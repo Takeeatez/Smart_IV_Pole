@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, Wifi, WifiOff, Activity } from 'lucide-react';
 import { useWardStore } from '../../stores/wardStore';
 import { useMQTT } from '../../hooks/useMQTT';
 import BedCard from './BedCard';
+import PatientModal from '../patient/PatientModal';
 
 const WardOverview: React.FC = () => {
+  const navigate = useNavigate();
   const { 
     beds, 
     wardStats, 
@@ -16,6 +19,8 @@ const WardOverview: React.FC = () => {
   
   const { isConnected, connectionStatus } = useMQTT();
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showPatientModal, setShowPatientModal] = useState(false);
+  const [selectedBedNumber, setSelectedBedNumber] = useState('');
 
   // Update current time every minute
   useEffect(() => {
@@ -31,9 +36,12 @@ const WardOverview: React.FC = () => {
   const handleBedClick = (bedNumber: string) => {
     const bed = beds.find(b => b.bedNumber === bedNumber);
     if (bed?.patient) {
-      setSelectedPatient(bed.patient.id);
-      // Navigate to patient detail page - will implement routing later
-      console.log('Navigate to patient:', bed.patient.id);
+      // Navigate to patient detail page
+      navigate(`/patient/${bed.patient.id}`);
+    } else {
+      // Show add patient modal for empty bed
+      setSelectedBedNumber(bedNumber);
+      setShowPatientModal(true);
     }
   };
 
@@ -65,12 +73,15 @@ const WardOverview: React.FC = () => {
               </div>
               <span>병동 전체</span>
             </div>
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
+            <button
+              onClick={() => navigate('/patients')}
+              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left"
+            >
               <div className="w-5 h-5 flex items-center justify-center">
                 <span className="text-xs">📋</span>
               </div>
               <span>환자 목록</span>
-            </div>
+            </button>
             <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
               <div className="w-5 h-5 flex items-center justify-center">
                 <span className="text-xs">🏥</span>
@@ -308,7 +319,10 @@ const WardOverview: React.FC = () => {
             <div className="mt-6 bg-white rounded-xl shadow-sm p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">빠른 작업</h3>
               <div className="space-y-3">
-                <button className="w-full p-3 text-left bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                <button 
+                  onClick={() => navigate('/patients')}
+                  className="w-full p-3 text-left bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                >
                   <div className="font-medium text-blue-800">신규 환자 등록</div>
                   <div className="text-sm text-blue-600">새로운 IV 투여 시작</div>
                 </button>
@@ -325,6 +339,16 @@ const WardOverview: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Patient Modal */}
+      <PatientModal
+        isOpen={showPatientModal}
+        onClose={() => {
+          setShowPatientModal(false);
+          setSelectedBedNumber('');
+        }}
+        bedNumber={selectedBedNumber}
+      />
     </div>
   );
 };

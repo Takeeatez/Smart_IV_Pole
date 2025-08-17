@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { Patient, PoleData, Alert, BedInfo, WardStats, StatusColor } from '../types';
+import { Patient, PoleData, Alert, BedInfo, WardStats, StatusColor, IVPrescription } from '../types';
+import { createIVPrescription } from '../utils/gttCalculator';
 
 interface WardStore {
   // State
@@ -19,10 +20,19 @@ interface WardStore {
   updateWardStats: () => void;
   initializeMockData: () => void;
   
+  // Patient Management
+  addPatient: (patient: Omit<Patient, 'id'>, bedNumber: string) => void;
+  updatePatient: (patientId: string, updates: Partial<Patient>) => void;
+  removePatient: (patientId: string) => void;
+  addIVPrescription: (patientId: string, prescription: Omit<IVPrescription, 'id'>) => void;
+  updateIVPrescription: (patientId: string, prescription: Partial<IVPrescription>) => void;
+  
   // Getters
   getBedStatus: (bedNumber: string) => StatusColor;
   getActiveAlerts: () => Alert[];
   getCriticalAlerts: () => Alert[];
+  getPatientById: (patientId: string) => Patient | undefined;
+  getBedByNumber: (bedNumber: string) => BedInfo | undefined;
 }
 
 // Helper function to determine status color based on pole data
@@ -151,6 +161,116 @@ export const useWardStore = create<WardStore>((set, get) => ({
   getCriticalAlerts: () => {
     const { alerts } = get();
     return alerts.filter(alert => !alert.acknowledged && alert.severity === 'critical');
+  },
+
+  getPatientById: (patientId: string) => {
+    const { patients } = get();
+    return patients.find(patient => patient.id === patientId);
+  },
+
+  getBedByNumber: (bedNumber: string) => {
+    const { beds } = get();
+    return beds.find(bed => bed.bedNumber === bedNumber);
+  },
+
+  // Patient Management Methods
+  addPatient: (patientData: Omit<Patient, 'id'>, bedNumber: string) => {
+    set((state) => {
+      const newPatient: Patient = {
+        ...patientData,
+        id: `P${Date.now()}`,
+      };
+
+      const updatedPatients = [...state.patients, newPatient];
+      const updatedBeds = state.beds.map(bed => 
+        bed.bedNumber === bedNumber 
+          ? { ...bed, patient: newPatient, status: 'occupied' as const }
+          : bed
+      );
+
+      return {
+        patients: updatedPatients,
+        beds: updatedBeds
+      };
+    });
+  },
+
+  updatePatient: (patientId: string, updates: Partial<Patient>) => {
+    set((state) => {
+      const updatedPatients = state.patients.map(patient =>
+        patient.id === patientId ? { ...patient, ...updates } : patient
+      );
+
+      const updatedBeds = state.beds.map(bed => {
+        if (bed.patient?.id === patientId) {
+          return {
+            ...bed,
+            patient: { ...bed.patient, ...updates }
+          };
+        }
+        return bed;
+      });
+
+      return {
+        patients: updatedPatients,
+        beds: updatedBeds
+      };
+    });
+  },
+
+  removePatient: (patientId: string) => {
+    set((state) => {
+      const updatedPatients = state.patients.filter(patient => patient.id !== patientId);
+      const updatedBeds = state.beds.map(bed => {
+        if (bed.patient?.id === patientId) {
+          return {
+            ...bed,
+            patient: undefined,
+            poleData: undefined,
+            status: 'empty' as const
+          };
+        }
+        return bed;
+      });
+
+      // Remove pole data for this patient
+      const newPoleData = new Map(state.poleData);
+      for (const [poleId, data] of newPoleData.entries()) {
+        if (data.patientId === patientId) {
+          newPoleData.delete(poleId);
+        }
+      }
+
+      return {
+        patients: updatedPatients,
+        beds: updatedBeds,
+        poleData: newPoleData
+      };
+    });
+  },
+
+  addIVPrescription: (patientId: string, prescriptionData: Omit<IVPrescription, 'id'>) => {
+    const prescription = createIVPrescription(
+      prescriptionData.medicationName,
+      prescriptionData.totalVolume,
+      prescriptionData.duration,
+      prescriptionData.gttFactor,
+      prescriptionData.prescribedBy,
+      prescriptionData.notes
+    );
+
+    get().updatePatient(patientId, { currentPrescription: prescription });
+  },
+
+  updateIVPrescription: (patientId: string, prescriptionUpdates: Partial<IVPrescription>) => {
+    const patient = get().getPatientById(patientId);
+    if (patient?.currentPrescription) {
+      const updatedPrescription = {
+        ...patient.currentPrescription,
+        ...prescriptionUpdates
+      };
+      get().updatePatient(patientId, { currentPrescription: updatedPrescription });
+    }
   },
 
   // Initialize with mock data for development

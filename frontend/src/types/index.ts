@@ -1,5 +1,27 @@
 // Smart IV Pole - Type Definitions
 
+export interface Medication {
+  id: string;
+  name: string;
+  concentration?: number; // mg/mL
+  commonDosages: number[];
+  unit: 'mg' | 'g' | 'mL' | 'units';
+  category: 'antibiotic' | 'analgesic' | 'fluid' | 'other';
+}
+
+export interface IVPrescription {
+  id: string;
+  medicationName: string;
+  totalVolume: number; // mL
+  duration: number; // 분
+  gttFactor: 20 | 60; // macro/micro drip (20 GTT/mL or 60 GTT/mL)
+  calculatedGTT: number; // GTT/min
+  calculatedFlowRate: number; // mL/hr
+  prescribedBy: string; // 의사명
+  prescribedAt: Date;
+  notes?: string;
+}
+
 export interface Patient {
   id: string;
   name: string;
@@ -10,6 +32,11 @@ export interface Patient {
   admissionDate: Date;
   age: number;
   gender: 'male' | 'female';
+  weight?: number; // kg
+  height?: number; // cm
+  allergies?: string[];
+  currentPrescription?: IVPrescription;
+  medicalHistory?: string[];
 }
 
 export interface PoleData {
