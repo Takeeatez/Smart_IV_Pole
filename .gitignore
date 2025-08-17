@@ -1,0 +1,123 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Backend (Spring Boot)
+backend/target/
+backend/*.ipr
+backend/*.iws
+backend/.idea/
+backend/.settings/
+backend/.classpath
+backend/.project
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+backend/logs/
+backend/*.log
+
+# Frontend (React)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnp
+frontend/.pnp.js
+frontend/coverage/
+
+# Mobile (Flutter)
+mobile/.dart_tool/
+mobile/.packages
+mobile/.pub-cache/
+mobile/.pub/
+mobile/build/
+mobile/android/.gradle/
+mobile/android/app/debug/
+mobile/android/app/profile/
+mobile/android/app/release/
+mobile/android/local.properties
+mobile/android/key.properties
+mobile/ios/Flutter/flutter_export_environment.sh
+mobile/ios/Runner.xcworkspace/
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.metadata
+mobile/*.lock
+
+# Hardware (ESP32)
+hardware/.pio/
+hardware/.vscode/
+
+# Database
+database/backup/*.sql
+database/backup/*.sql.gz
+
+# Docker
+docker/volumes/
+*.env
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+cache/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Test coverage
+coverage/
+*.lcov
+
+# Documentation build
+docs/_build/
+docs/.jekyll-cache/
+
+# Python (for scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Package files
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
