@@ -89,26 +89,36 @@ The project follows a modular retrofit design with these main components:
 ## Development Commands
 
 ### Backend (Spring Boot)
+- **Location**: `Smart_IV_Pole-be/` directory
+- **Port**: Runs on port 8081 (configured in `application.properties`)
 ```bash
-./mvnw spring-boot:run     # 개발 서버 실행
-./mvnw test                # 테스트 실행
-./mvnw clean package       # 빌드
+cd Smart_IV_Pole-be/
+./gradlew bootRun         # 개발 서버 실행 (port 8081)
+./gradlew test            # 테스트 실행
+./gradlew build          # 빌드
+./gradlew clean build    # 클린 빌드
 ```
 
 ### Frontend (React)
+- **Location**: `frontend/` directory  
+- **Port**: Development server on port 5173 (Vite default)
+- **Build System**: Vite with TypeScript and React 19
 ```bash
-cd frontend/              # 프론트엔드 디렉토리로 이동
+cd frontend/
 npm install               # 의존성 설치
-npm run dev              # 개발 서버 (Vite) - http://localhost:3000
-npm run build            # 프로덕션 빌드
+npm run dev              # 개발 서버 (Vite) - http://localhost:5173
+npm run build            # TypeScript 컴파일 + Vite 프로덕션 빌드
 npm run lint             # ESLint 코드 검사
 npm run preview          # 빌드 결과 미리보기
 ```
 
 ### Database & MQTT
 ```bash
-docker-compose up -d mariadb    # MariaDB 컨테이너 실행
-docker-compose up -d mosquitto  # MQTT 브로커 실행
+# MariaDB 컨테이너 실행 (if using Docker)
+docker-compose up -d mariadb    
+
+# MQTT 브로커 실행 (if using Docker)  
+docker-compose up -d mosquitto  
 ```
 
 ### Mobile (Flutter)
@@ -122,29 +132,34 @@ flutter build ios        # iOS 빌드
 ## Project Structure
 
 ```
-smart-iv-pole/
-├── backend/              # Spring Boot 서버
+Smart_IV_Pole/
+├── Smart_IV_Pole-be/    # Spring Boot 서버 (port 8081)
 │   ├── src/main/java/
 │   ├── src/main/resources/
-│   └── pom.xml or build.gradle
-├── frontend/            # React 간호사 대시보드
+│   │   └── application.properties  # 서버 포트 8081 설정
+│   └── build.gradle                # Gradle 빌드 설정
+├── frontend/            # React 간호사 대시보드 (port 5173)
 │   ├── src/
 │   │   ├── components/  # 재사용 가능한 컴포넌트
 │   │   │   ├── layout/  # 레이아웃 컴포넌트
-│   │   │   └── ward/    # 병동 관련 컴포넌트
+│   │   │   ├── ward/    # 병동 관련 컴포넌트
+│   │   │   └── patient/ # 환자 관련 컴포넌트
 │   │   ├── hooks/       # 커스텀 훅 (MQTT 연결 등)
+│   │   ├── services/    # API 서비스 & localStorage 관리
+│   │   │   ├── api.ts              # 백엔드 API 연동
+│   │   │   └── storageService.ts   # 로컬 데이터 영속성
 │   │   ├── stores/      # Zustand 상태 관리
+│   │   │   └── wardStore.ts        # 중앙 상태 관리
 │   │   ├── types/       # TypeScript 타입 정의
+│   │   ├── utils/       # 유틸리티 (GTT 계산기 등)
 │   │   └── pages/       # 페이지 컴포넌트
 │   ├── public/
-│   └── package.json
-├── mobile/              # Flutter 앱
-│   ├── lib/
-│   └── pubspec.yaml
-├── hardware/            # ESP32 펌웨어
-│   └── smart_iv_pole.ino
-├── database/            # DB 스키마 & 마이그레이션
-└── docker-compose.yml   # 개발 환경 설정
+│   ├── package.json
+│   └── CLAUDE.md        # 프론트엔드 전용 가이드
+├── mobile/              # Flutter 앱 (계획)
+├── hardware/            # ESP32 펌웨어 (계획)
+├── DB/                  # 데이터베이스 스키마
+└── README.md            # 프로젝트 전체 개요
 ```
 
 ## Security & Privacy Considerations
@@ -203,36 +218,55 @@ smart-iv-pole/
 2. Flutter 앱 개발
 3. 전체 시스템 테스트
 
+## Core Medical Algorithm
+
+### GTT (점적수) Calculation System
+The most critical component is the **GTT calculator** that bridges manual nurse input with real-time sensor data:
+
+- **Primary Input**: Nurse manual entry for medication volume, duration, and GTT factor
+- **Formula**: `(총 용량 × GTT factor) / 투여 시간(분)` where GTT factor is 20 (macro) or 60 (micro)
+- **Real-time Monitoring**: ESP32 load cell data provides accuracy verification
+- **Status Algorithm**: Compare expected vs. actual depletion rates:
+  - **정상 (Normal)**: Actual rate within ±10% of calculated rate  
+  - **주의 (Warning)**: 10-20% deviation from expected rate
+  - **응급 (Critical)**: >20% deviation - major discrepancy requiring immediate attention
+
+This algorithm is the **core differentiator** - providing intelligent early warning when actual IV consumption significantly deviates from nurse's initial calculations.
+
 ## Frontend Architecture
 
-### State Management
-The React frontend uses **Zustand** for state management with the following stores:
-- **wardStore.ts**: Manages ward-level data including beds, patients, pole data, and alerts
-- **Real-time Updates**: MQTT simulation for hardware integration preparation
+### State Management with Data Persistence
+- **wardStore.ts**: Central Zustand store managing all ward data with localStorage persistence
+- **storageService.ts**: Handles local data persistence - prevents data loss on refresh/navigation
+- **Real-time Updates**: Mock MQTT simulation with persistent state across sessions
+
+### API Integration
+- **Backend Connection**: Automatically connects to Spring Boot server on port 8081
+- **Offline Mode**: Falls back to localStorage when backend unavailable
+- **Data Synchronization**: Server data takes priority, with local persistence as fallback
 
 ### Component Architecture
-- **WardOverview**: Main dashboard showing 6-bed grid layout with real-time status
-- **BedCard**: Individual bed status cards with IV monitoring data and color-coded alerts
-- **MQTT Integration**: Custom hooks for real-time data simulation and future hardware connectivity
+- **WardOverview**: Main dashboard with 6-bed grid and real-time status monitoring
+- **PatientList**: Comprehensive patient management with search and detailed IV tracking
+- **PatientModal**: Patient registration/editing with GTT prescription calculator
+- **Real-time Navigation**: Data persists across all routes and page refreshes
 
-### Data Flow
+### Data Flow Architecture
 ```
-ESP32 → MQTT → useMQTT Hook → wardStore → UI Components
+ESP32 Sensors → MQTT → Backend (port 8081) → Frontend API calls → wardStore → localStorage
+                                                                      ↓
+                                                            UI Components (persistent)
 ```
 
 ### Key Features Implemented
-- **Ward-wide monitoring**: 6-bed grid layout with color-coded status (green/orange/red/gray)
-- **Real-time alerts**: Priority-based alert system with automatic notifications
-- **IV status tracking**: Fluid levels, flow rates, battery status, estimated completion times
-- **Mock MQTT simulation**: Prepares for ESP32 hardware integration
-
-### Current Implementation Status
-- ✅ Ward overview dashboard with 6-bed layout
-- ✅ Real-time status updates and color coding
-- ✅ Alert management system
-- ✅ MQTT simulation for hardware preparation
+- ✅ **Data Persistence**: localStorage prevents data loss on navigation/refresh
+- ✅ **Backend Integration**: Automatic server connection with offline fallback
+- ✅ **Patient Management**: Full CRUD operations with GTT prescription calculator
+- ✅ **Ward Monitoring**: 6-bed dashboard with color-coded real-time status
+- ✅ **Alert System**: Priority-based notifications with acknowledgment tracking
+- ✅ **GTT Calculator**: Medical-grade IV infusion rate calculations
 - 🚧 Individual patient detail pages (planned)
-- 🚧 Hardware integration (ESP32 development in progress)
+- 🚧 ESP32 hardware integration (in development)
 
 ## Notes for Implementation
 

@@ -170,34 +170,42 @@ export const calculateFlowDeviation = (
  */
 export const COMMON_MEDICATIONS = [
   {
-    id: 'saline_500',
-    name: '생리식염수 500mL',
+    id: 'saline',
+    name: '생리식염수',
     concentration: undefined,
-    commonDosages: [500],
+    commonDosages: [500, 1000],
     unit: 'mL' as const,
     category: 'fluid' as const
   },
   {
-    id: 'saline_1000',
-    name: '생리식염수 1000mL',
+    id: 'dextrose_5',
+    name: '5% 포도당',
     concentration: undefined,
-    commonDosages: [1000],
+    commonDosages: [500, 1000],
     unit: 'mL' as const,
     category: 'fluid' as const
   },
   {
-    id: 'dextrose_500',
-    name: '5% 포도당 500mL',
+    id: 'dextrose_10',
+    name: '10% 포도당',
     concentration: undefined,
-    commonDosages: [500],
+    commonDosages: [500, 1000],
     unit: 'mL' as const,
     category: 'fluid' as const
   },
   {
-    id: 'ringer_500',
-    name: '링거액 500mL',
+    id: 'ringer',
+    name: '링거액',
     concentration: undefined,
-    commonDosages: [500],
+    commonDosages: [500, 1000],
+    unit: 'mL' as const,
+    category: 'fluid' as const
+  },
+  {
+    id: 'hartmann',
+    name: '하트만액',
+    concentration: undefined,
+    commonDosages: [500, 1000],
     unit: 'mL' as const,
     category: 'fluid' as const
   }

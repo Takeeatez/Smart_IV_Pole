@@ -411,18 +411,41 @@ const PatientModal: React.FC<PatientModalProps> = ({
                     <Calculator className="w-5 h-5 text-blue-600" />
                     <h4 className="font-semibold text-blue-900">자동 계산 결과</h4>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-4 mb-3">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-blue-600">
                         {calculatedValues.gtt}
                       </div>
-                      <div className="text-sm text-blue-700">GTT/min</div>
+                      <div className="text-sm text-blue-700">GTT/min (분당 방울 수)</div>
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-blue-600">
                         {calculatedValues.flowRate}
                       </div>
-                      <div className="text-sm text-blue-700">mL/hr</div>
+                      <div className="text-sm text-blue-700">mL/hr (시간당 투여량)</div>
+                    </div>
+                  </div>
+                  <div className="border-t border-blue-200 pt-3">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-600" />
+                      <div className="text-sm">
+                        <span className="font-medium text-blue-900">예상 투여 종료 시간: </span>
+                        <span className="text-blue-700">
+                          {(() => {
+                            const endTime = new Date();
+                            endTime.setMinutes(endTime.getMinutes() + parseInt(prescriptionForm.duration));
+                            return endTime.toLocaleString('ko-KR', {
+                              month: 'long',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            });
+                          })()}
+                        </span>
+                        <span className="text-blue-600 ml-2">
+                          ({Math.floor(parseInt(prescriptionForm.duration) / 60)}시간 {parseInt(prescriptionForm.duration) % 60}분 후)
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

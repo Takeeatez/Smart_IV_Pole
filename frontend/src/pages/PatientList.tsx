@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Settings, Droplet, Battery, Clock } from 'lucide-react';
+import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Settings, Droplet, Battery, Clock, Trash2, AlertCircle } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
 import { calculateProgress, calculateRemainingTime } from '../utils/gttCalculator';
 import PatientModal from '../components/patient/PatientModal';
@@ -10,8 +10,10 @@ const PatientList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
+  const [patientToDelete, setPatientToDelete] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
-  const { patients, beds, poleData } = useWardStore();
+  const { patients, beds, poleData, removePatient } = useWardStore();
 
   // Filter patients based on search term
   const filteredPatients = patients.filter(patient =>
@@ -65,6 +67,19 @@ const PatientList: React.FC = () => {
     setSelectedPatient(patientId);
   };
 
+  const handleDeletePatient = (patientId: string) => {
+    setPatientToDelete(patientId);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    if (patientToDelete) {
+      removePatient(patientToDelete);
+      setShowDeleteConfirm(false);
+      setPatientToDelete(null);
+    }
+  };
+
   const getEditPatient = () => {
     return selectedPatient ? patients.find(p => p.id === selectedPatient) : undefined;
   };
@@ -73,6 +88,10 @@ const PatientList: React.FC = () => {
     if (!selectedPatient) return '';
     const bed = getPatientBed(selectedPatient);
     return bed?.bedNumber || '';
+  };
+
+  const getDeletePatient = () => {
+    return patientToDelete ? patients.find(p => p.id === patientToDelete) : null;
   };
 
   return (
@@ -312,6 +331,13 @@ const PatientList: React.FC = () => {
                             >
                               <Edit className="w-4 h-4" />
                             </button>
+                            <button
+                              onClick={() => handleDeletePatient(patient.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="삭제"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -371,6 +397,66 @@ const PatientList: React.FC = () => {
         bedNumber={getEditBedNumber()}
         patient={getEditPatient()}
       />
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">환자 정보 삭제</h3>
+                <p className="text-sm text-gray-600">이 작업은 되돌릴 수 없습니다.</p>
+              </div>
+            </div>
+            
+            {getDeletePatient() && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                <div className="text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">환자명:</span>
+                    <span className="font-medium text-gray-900">{getDeletePatient()?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">침대:</span>
+                    <span className="font-medium text-gray-900">{getDeletePatient()?.bed}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">담당간호사:</span>
+                    <span className="font-medium text-gray-900">{getDeletePatient()?.nurseName}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <p className="text-sm text-gray-700 mb-6">
+              정말로 <span className="font-semibold">{getDeletePatient()?.name}</span> 환자의 정보를 삭제하시겠습니까?
+              삭제된 정보는 복구할 수 없습니다.
+            </p>
+            
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setPatientToDelete(null);
+                }}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
