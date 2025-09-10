@@ -26,7 +26,7 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
   const intervalRef = useRef<NodeJS.Timeout>();
   const { updatePoleData, addAlert, initializeMockData } = useWardStore();
 
-  // Simulate MQTT connection and real-time data
+  // Initialize static mock data without real-time updates
   useEffect(() => {
     // Initialize mock data
     initializeMockData();
@@ -37,10 +37,10 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
     const connectTimer = setTimeout(() => {
       setIsConnected(true);
       setConnectionStatus('connected');
-      console.log('🔗 Mock MQTT Connected - Simulating ESP32 data');
+      console.log('🔗 Mock MQTT Connected - Static mode (waiting for database connection)');
       
-      // Start simulating real-time data updates
-      startMockDataSimulation();
+      // Don't start real-time simulation - keep data static
+      // startMockDataSimulation();
     }, 1000);
 
     return () => {
@@ -177,26 +177,26 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
     });
   };
 
-  // Simulate MQTT disconnect/reconnect scenarios
-  useEffect(() => {
-    const reconnectTimer = setInterval(() => {
-      if (Math.random() < 0.02) { // 2% chance of disconnect
-        setIsConnected(false);
-        setConnectionStatus('disconnected');
-        stopMockDataSimulation();
-        
-        // Reconnect after 3-5 seconds
-        setTimeout(() => {
-          setIsConnected(true);
-          setConnectionStatus('connected');
-          startMockDataSimulation();
-          console.log('🔄 Mock MQTT Reconnected');
-        }, 3000 + Math.random() * 2000);
-      }
-    }, 10000); // Check every 10 seconds
+  // Disable disconnect/reconnect simulation for static mode
+  // useEffect(() => {
+  //   const reconnectTimer = setInterval(() => {
+  //     if (Math.random() < 0.02) { // 2% chance of disconnect
+  //       setIsConnected(false);
+  //       setConnectionStatus('disconnected');
+  //       stopMockDataSimulation();
+  //       
+  //       // Reconnect after 3-5 seconds
+  //       setTimeout(() => {
+  //         setIsConnected(true);
+  //         setConnectionStatus('connected');
+  //         startMockDataSimulation();
+  //         console.log('🔄 Mock MQTT Reconnected');
+  //       }, 3000 + Math.random() * 2000);
+  //     }
+  //   }, 10000); // Check every 10 seconds
 
-    return () => clearInterval(reconnectTimer);
-  }, []);
+  //   return () => clearInterval(reconnectTimer);
+  // }, []);
 
   return {
     isConnected,

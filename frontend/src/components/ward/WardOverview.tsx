@@ -249,7 +249,7 @@ const WardOverview: React.FC = () => {
           {/* Bed Grid */}
           <div className="col-span-8">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">병실 현황</h2>
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-3 gap-x-6 gap-y-10">
               {beds.map((bed) => (
                 <BedCard
                   key={bed.bedNumber}

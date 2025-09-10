@@ -1,6 +1,6 @@
 import React from 'react';
 import { BedInfo, StatusColor } from '../../types';
-import { Battery, Droplet, Clock, AlertTriangle, Phone } from 'lucide-react';
+import { Battery, Droplet, Clock, AlertTriangle, Phone, Plus } from 'lucide-react';
 
 interface BedCardProps {
   bed: BedInfo;
@@ -61,11 +61,18 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
 
   if (!isOccupied) {
     return (
-      <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-6 hover:border-gray-300 transition-colors cursor-pointer h-64 flex flex-col items-center justify-center">
+      <div 
+        onClick={onClick}
+        className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer h-64 flex flex-col items-center justify-center group"
+      >
         <div className="text-gray-400 text-lg font-medium mb-2">{bed.bedNumber}</div>
-        <div className="text-gray-500 text-sm">비어있음</div>
-        <div className="mt-4 w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-          <span className="text-gray-400 text-2xl">🛏️</span>
+        <div className="text-gray-500 text-sm mb-4">비어있음</div>
+        <div className="mt-2 w-14 h-14 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors">
+          <Plus className="w-7 h-7 text-gray-400 group-hover:text-blue-600 transition-colors" />
+        </div>
+        <div className="mt-4 text-center">
+          <div className="text-blue-600 text-sm font-medium group-hover:text-blue-700">환자 등록</div>
+          <div className="text-gray-400 text-xs mt-1">클릭하여 새 환자 추가</div>
         </div>
       </div>
     );
@@ -120,7 +127,7 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
                   <span className="text-sm font-medium text-gray-700">수액량</span>
                 </div>
                 <span className="text-sm font-bold text-gray-900">
-                  {bed.poleData.percentage.toFixed(0)}%
+                  {Math.round(bed.poleData.percentage)}%
                 </span>
               </div>
               
@@ -133,7 +140,7 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
               </div>
               
               <div className="flex justify-between text-xs text-gray-600 mt-1">
-                <span>{bed.poleData.currentVolume.toFixed(0)}ml</span>
+                <span>{Math.round(bed.poleData.currentVolume)}ml</span>
                 <span>{bed.poleData.capacity}ml</span>
               </div>
             </div>
@@ -143,7 +150,7 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-600">유량</span>
                 <span className="text-xs font-medium text-gray-800">
-                  {bed.poleData.flowRate.toFixed(0)} mL/h
+                  {Math.round(bed.poleData.flowRate)} mL/h
                 </span>
               </div>
             </div>
@@ -174,7 +181,7 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
                 <span className="text-xs text-gray-600">배터리</span>
               </div>
               <span className="text-xs font-medium text-gray-800">
-                {bed.poleData.battery}%
+                {Math.round(bed.poleData.battery)}%
               </span>
             </div>
           </>
