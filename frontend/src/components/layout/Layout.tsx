@@ -27,10 +27,7 @@ export default function Layout({ children, activeMenuItem }: LayoutProps) {
         lg:translate-x-0 lg:static lg:inset-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <Sidebar 
-          activeItem={activeMenuItem}
-          onNavigate={handleNavigate}
-        />
+        <Sidebar />
       </div>
 
       {/* Overlay for mobile */}

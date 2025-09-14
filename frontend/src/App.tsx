@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import WardOverview from './components/ward/WardOverview'
 import PatientDetail from './pages/PatientDetail'
 import PatientList from './pages/PatientList'
+import Statistics from './pages/Statistics'
+import Settings from './pages/Settings'
 import { useWardStore } from './stores/wardStore'
 import { useMQTT } from './hooks/useMQTT'
 
@@ -59,6 +61,8 @@ function App() {
         <Route path="/" element={<WardOverview />} />
         <Route path="/patients" element={<PatientList />} />
         <Route path="/patient/:id" element={<PatientDetail />} />
+        <Route path="/statistics" element={<Statistics />} />
+        <Route path="/settings" element={<Settings />} />
       </Routes>
     </Router>
   )

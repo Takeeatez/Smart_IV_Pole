@@ -23,8 +23,8 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
   const [lastMessage, setLastMessage] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   
-  const intervalRef = useRef<NodeJS.Timeout>();
-  const { updatePoleData, addAlert, initializeMockData } = useWardStore();
+  const intervalRef = useRef<number | undefined>(undefined);
+  const { updatePoleData, initializeMockData } = useWardStore();
 
   // Initialize static mock data without real-time updates
   useEffect(() => {
@@ -56,7 +56,7 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
   };
 
   const stopMockDataSimulation = () => {
-    if (intervalRef.current) {
+    if (intervalRef.current !== undefined) {
       clearInterval(intervalRef.current);
     }
   };
@@ -91,19 +91,7 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
             estimatedTime: Math.max(40 - (Date.now() % 100000) / 2500, 10)
           });
 
-          // Generate low fluid alert
-          if (lowPercentage < 10 && Math.random() < 0.1) {
-            addAlert({
-              id: `A${Date.now()}`,
-              poleId: 'POLE002',
-              patientId: 'P002',
-              type: 'low',
-              severity: 'warning',
-              message: `301A-2 박서준: 수액 부족 (${Math.round(lowPercentage)}%)`,
-              timestamp: new Date(),
-              acknowledged: false
-            });
-          }
+          // 목업 알림 생성 제거됨 - 실제 하드웨어 연동 시 구현 예정
           break;
 
         case 'POLE003': // Critical - almost empty
@@ -119,19 +107,7 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
             isButtonPressed: Math.random() < 0.3 // 30% chance of button pressed
           });
 
-          // Generate critical alert
-          if (criticalPercentage < 2 && Math.random() < 0.2) {
-            addAlert({
-              id: `A${Date.now()}`,
-              poleId: 'POLE003',
-              patientId: 'P003',
-              type: 'empty',
-              severity: 'critical',
-              message: `301B-1 최유진: 수액 소진 임박 (${Math.round(criticalPercentage * 10)}ml)`,
-              timestamp: new Date(),
-              acknowledged: false
-            });
-          }
+          // 목업 알림 생성 제거됨 - 실제 하드웨어 연동 시 구현 예정
           break;
 
         case 'POLE004': // Offline simulation
@@ -149,27 +125,7 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
       }
     });
 
-    // Simulate random button presses
-    if (Math.random() < 0.05) { // 5% chance per update
-      const randomPole = poles[Math.floor(Math.random() * 3)]; // Exclude POLE004
-      const patientIds = ['P001', 'P002', 'P003'];
-      const patientNames = ['김민지', '박서준', '최유진'];
-      const beds = ['301A-1', '301A-2', '301B-1'];
-      
-      const index = poles.indexOf(randomPole);
-      if (index < 3) {
-        addAlert({
-          id: `A${Date.now()}`,
-          poleId: randomPole,
-          patientId: patientIds[index],
-          type: 'button_pressed',
-          severity: 'warning',
-          message: `${beds[index]} ${patientNames[index]}: 환자 호출 요청`,
-          timestamp: new Date(),
-          acknowledged: false
-        });
-      }
-    }
+    // 랜덤 버튼 프레스 시뮬레이션 제거됨 - 실제 하드웨어 연동 시 구현 예정
 
     setLastMessage({
       timestamp: new Date(),

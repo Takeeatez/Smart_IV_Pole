@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Settings, Droplet, Battery, Clock, Trash2, AlertCircle } from 'lucide-react';
+import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
 import { calculateProgress, calculateRemainingTime } from '../utils/gttCalculator';
 import PatientModal from '../components/patient/PatientModal';
+import Sidebar from '../components/layout/Sidebar';
 
 const PatientList: React.FC = () => {
   const navigate = useNavigate();
@@ -12,40 +13,155 @@ const PatientList: React.FC = () => {
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
   const [patientToDelete, setPatientToDelete] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  
-  const { patients, beds, poleData, removePatient } = useWardStore();
 
-  // Filter patients based on search term
-  const filteredPatients = patients.filter(patient =>
-    patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.bed.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.nurseName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Advanced filtering states
+  const [statusFilter, setStatusFilter] = useState<'all' | 'normal' | 'warning' | 'critical' | 'offline'>('all');
+  const [roomFilter, setRoomFilter] = useState<string>('all');
+  const [nurseFilter, setNurseFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'room' | 'status' | 'remaining'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const { patients, beds, removePatient } = useWardStore();
+
+  // Get unique rooms and nurses for filter options
+  const uniqueRooms = useMemo(() => {
+    if (!patients || !Array.isArray(patients)) return [];
+    const rooms = [...new Set(patients.map(p => p?.room).filter(Boolean))].sort();
+    return rooms;
+  }, [patients]);
+
+  const uniqueNurses = useMemo(() => {
+    if (!patients || !Array.isArray(patients)) return [];
+    const nurses = [...new Set(patients.map(p => p?.nurseName).filter(Boolean))].sort();
+    return nurses;
+  }, [patients]);
+
+  // Advanced filtering and sorting logic
+  const filteredAndSortedPatients = useMemo(() => {
+    // 안전성 체크: patients 배열이 없거나 비어있으면 빈 배열 반환
+    if (!patients || !Array.isArray(patients) || patients.length === 0) {
+      return [];
+    }
+
+    let filtered = patients.filter(patient => {
+      // Search filter
+      const matchesSearch = searchTerm === '' ||
+        patient?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient?.bed?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        patient?.nurseName?.toLowerCase().includes(searchTerm.toLowerCase());
+
+      // Status filter - 안전한 데이터 접근
+      const status = getPatientStatus(patient.id);
+      const matchesStatus = statusFilter === 'all' || status === statusFilter;
+
+      // Room filter
+      const matchesRoom = roomFilter === 'all' || patient?.room === roomFilter;
+
+      // Nurse filter
+      const matchesNurse = nurseFilter === 'all' || patient?.nurseName === nurseFilter;
+
+      return matchesSearch && matchesStatus && matchesRoom && matchesNurse;
+    });
+
+    // Sorting
+    filtered.sort((a, b) => {
+      let aValue: any, bValue: any;
+
+      switch (sortBy) {
+        case 'name':
+          aValue = a.name;
+          bValue = b.name;
+          break;
+        case 'room':
+          aValue = a.room + a.bed;
+          bValue = b.room + b.bed;
+          break;
+        case 'status':
+          aValue = getPatientStatusValue(a.id);
+          bValue = getPatientStatusValue(b.id);
+          break;
+        case 'remaining':
+          aValue = getPatientRemainingTime(a.id);
+          bValue = getPatientRemainingTime(b.id);
+          break;
+        default:
+          aValue = a.name;
+          bValue = b.name;
+      }
+
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortOrder === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+
+      return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+    });
+
+    return filtered;
+  }, [patients, searchTerm, statusFilter, roomFilter, nurseFilter, sortBy, sortOrder]);
 
   const getPatientBed = (patientId: string) => {
+    if (!beds || !Array.isArray(beds) || !patientId) return undefined;
     return beds.find(bed => bed.patient?.id === patientId);
   };
 
   const getPatientPoleData = (patientId: string) => {
+    if (!patientId) return undefined;
     const bed = getPatientBed(patientId);
     return bed?.poleData;
   };
 
-  const getStatusBadge = (patientId: string) => {
+  const getPatientStatus = (patientId: string): 'normal' | 'warning' | 'critical' | 'offline' => {
+    if (!patientId) return 'offline';
+
     const poleData = getPatientPoleData(patientId);
-    
+
+    if (!poleData || poleData.status === 'offline') return 'offline';
+    if (poleData.percentage < 10) return 'critical';
+    if (poleData.percentage <= 30) return 'warning';
+    return 'normal';
+  };
+
+  const getPatientStatusValue = (patientId: string): number => {
+    const status = getPatientStatus(patientId);
+    const statusValues = { critical: 4, warning: 3, normal: 2, offline: 1 };
+    return statusValues[status];
+  };
+
+  const getPatientRemainingTime = (patientId: string): number => {
+    if (!patientId || !patients || !Array.isArray(patients)) return 0;
+
+    const patient = patients.find(p => p.id === patientId);
+    if (!patient?.currentPrescription) return 0;
+
+    return calculateRemainingTime(
+      patient.currentPrescription.prescribedAt,
+      patient.currentPrescription.duration,
+      new Date()
+    );
+  };
+
+  const getStatusBadge = (patientId: string) => {
+    if (!patientId) {
+      return <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">알 수 없음</span>;
+    }
+
+    const poleData = getPatientPoleData(patientId);
+
     if (!poleData || poleData.status === 'offline') {
       return <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">오프라인</span>;
     }
-    
+
     if (poleData.percentage < 10) {
       return <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">응급</span>;
     }
-    
+
     if (poleData.percentage <= 30) {
       return <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-700">주의</span>;
     }
-    
+
     return <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">정상</span>;
   };
 
@@ -97,78 +213,7 @@ const PatientList: React.FC = () => {
   return (
     <>
       <div className="flex h-screen bg-gray-50">
-        {/* Sidebar */}
-        <div className="w-64 bg-slate-800 text-white">
-          {/* Logo */}
-          <div className="p-6 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center">
-                <span className="text-white font-bold text-sm">IV</span>
-              </div>
-              <span className="font-semibold text-lg">SMART POLE</span>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="mt-6">
-            <div className="px-4 space-y-2">
-              <button
-                onClick={() => navigate('/')}
-                className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left"
-              >
-                <div className="w-5 h-5 flex items-center justify-center">
-                  <span className="text-xs">📊</span>
-                </div>
-                <span>병동 전체</span>
-              </button>
-              <div className="flex items-center gap-3 p-3 bg-slate-700 rounded-lg">
-                <div className="w-5 h-5 bg-blue-400 rounded-sm flex items-center justify-center">
-                  <span className="text-xs">📋</span>
-                </div>
-                <span>환자 목록</span>
-              </div>
-              <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-                <div className="w-5 h-5 flex items-center justify-center">
-                  <span className="text-xs">🏥</span>
-                </div>
-                <span>IV 폴대</span>
-              </div>
-              <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-                <div className="w-5 h-5 flex items-center justify-center">
-                  <span className="text-xs">📈</span>
-                </div>
-                <span>모니터링</span>
-              </div>
-              <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-                <div className="w-5 h-5 flex items-center justify-center">
-                  <span className="text-xs">🔔</span>
-                </div>
-                <span>알림</span>
-              </div>
-            </div>
-          </nav>
-
-          {/* Bottom Section */}
-          <div className="absolute bottom-0 w-64 p-4 border-t border-slate-700">
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-              <div className="w-5 h-5 flex items-center justify-center">
-                <Settings className="w-4 h-4" />
-              </div>
-              <span>설정</span>
-            </div>
-            <div className="flex items-center gap-3 mt-4">
-              <div className="w-10 h-10 bg-gray-400 rounded-full overflow-hidden">
-                <div className="w-full h-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
-                  김
-                </div>
-              </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium">김수연 간호사</div>
-                <div className="text-xs text-slate-400">A병동 책임간호사</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <Sidebar />
 
         {/* Main Content */}
         <div className="flex-1 p-8">
@@ -196,21 +241,122 @@ const PatientList: React.FC = () => {
           </div>
 
           {/* Search and Filter */}
-          <div className="flex gap-4 mb-6">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="환자명, 침대번호, 담당간호사로 검색..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+          <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+            <div className="flex gap-4 mb-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="환자명, 침대번호, 담당간호사로 검색..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`px-4 py-2 border rounded-lg transition-colors flex items-center gap-2 ${
+                  showFilters
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <Filter className="w-4 h-4" />
+                필터
+              </button>
+
+              {/* Sort Dropdown */}
+              <select
+                value={`${sortBy}-${sortOrder}`}
+                onChange={(e) => {
+                  const [field, order] = e.target.value.split('-') as [typeof sortBy, typeof sortOrder];
+                  setSortBy(field);
+                  setSortOrder(order);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="name-asc">이름 ↑</option>
+                <option value="name-desc">이름 ↓</option>
+                <option value="room-asc">병실 ↑</option>
+                <option value="room-desc">병실 ↓</option>
+                <option value="status-desc">상태 (위험순)</option>
+                <option value="status-asc">상태 (정상순)</option>
+                <option value="remaining-asc">남은시간 ↑</option>
+                <option value="remaining-desc">남은시간 ↓</option>
+              </select>
             </div>
-            <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              필터
-            </button>
+
+            {/* Advanced Filters */}
+            {showFilters && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t">
+                {/* Status Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">상태</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">모든 상태</option>
+                    <option value="critical">응급</option>
+                    <option value="warning">주의</option>
+                    <option value="normal">정상</option>
+                    <option value="offline">오프라인</option>
+                  </select>
+                </div>
+
+                {/* Room Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">병실</label>
+                  <select
+                    value={roomFilter}
+                    onChange={(e) => setRoomFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">모든 병실</option>
+                    {uniqueRooms.map(room => (
+                      <option key={room} value={room}>{room}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Nurse Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">담당간호사</label>
+                  <select
+                    value={nurseFilter}
+                    onChange={(e) => setNurseFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">모든 간호사</option>
+                    {uniqueNurses.map(nurse => (
+                      <option key={nurse} value={nurse}>{nurse}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Clear Filters */}
+                <div className="md:col-span-3 flex justify-between items-center pt-2">
+                  <div className="text-sm text-gray-600">
+                    총 {filteredAndSortedPatients.length}명 (전체 {patients.length}명 중)
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                      setRoomFilter('all');
+                      setNurseFilter('all');
+                      setSortBy('name');
+                      setSortOrder('asc');
+                    }}
+                    className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 transition-colors flex items-center gap-1"
+                  >
+                    <X className="w-4 h-4" />
+                    필터 초기화
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Patient Table */}
@@ -228,14 +374,20 @@ const PatientList: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredPatients.length === 0 ? (
+                {filteredAndSortedPatients.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                      {searchTerm ? '검색 결과가 없습니다.' : '등록된 환자가 없습니다.'}
+                      {searchTerm || statusFilter !== 'all' || roomFilter !== 'all' || nurseFilter !== 'all'
+                        ? '필터 조건에 맞는 환자가 없습니다.'
+                        : '등록된 환자가 없습니다.'
+                      }
                     </td>
                   </tr>
                 ) : (
-                  filteredPatients.map((patient) => {
+                  filteredAndSortedPatients.map((patient) => {
+                    // 환자 데이터 안전성 체크
+                    if (!patient || !patient.id) return null;
+
                     const poleData = getPatientPoleData(patient.id);
                     const prescription = patient.currentPrescription;
                     const progress = prescription ? calculateProgress(prescription.prescribedAt, prescription.duration) : 0;
@@ -246,19 +398,19 @@ const PatientList: React.FC = () => {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-cyan-100 rounded-full flex items-center justify-center">
-                              <span className="font-semibold text-cyan-600">{patient.name.charAt(0)}</span>
+                              <span className="font-semibold text-cyan-600">{patient.name?.charAt(0) || '?'}</span>
                             </div>
                             <div>
-                              <div className="font-medium text-gray-900">{patient.name}</div>
+                              <div className="font-medium text-gray-900">{patient.name || '이름 없음'}</div>
                               <div className="text-sm text-gray-500">
-                                {patient.age}세 • {patient.gender === 'female' ? '여성' : '남성'}
+                                {patient.age || 0}세 • {patient.gender === 'female' ? '여성' : patient.gender === 'male' ? '남성' : '미정'}
                               </div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="font-medium text-gray-900">{patient.bed}</div>
-                          <div className="text-sm text-gray-500">{patient.room}</div>
+                          <div className="font-medium text-gray-900">{patient.bed || '미배정'}</div>
+                          <div className="text-sm text-gray-500">{patient.room || '미배정'}</div>
                         </td>
                         <td className="px-6 py-4">
                           {getStatusBadge(patient.id)}
@@ -310,9 +462,9 @@ const PatientList: React.FC = () => {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="font-medium text-gray-900">{patient.nurseName}</div>
+                          <div className="font-medium text-gray-900">{patient.nurseName || '담당간호사 미배정'}</div>
                           <div className="text-sm text-gray-500">
-                            입원일: {patient.admissionDate.toLocaleDateString('ko-KR')}
+                            입원일: {patient.admissionDate ? patient.admissionDate.toLocaleDateString('ko-KR') : '미정'}
                           </div>
                         </td>
                         <td className="px-6 py-4">

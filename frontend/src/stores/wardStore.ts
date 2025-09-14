@@ -24,7 +24,7 @@ interface WardStore {
   setSelectedPatient: (patientId: string | null) => void;
   updateWardStats: () => void;
   initializeMockData: () => void;
-  loadStoredData: () => void;
+  loadStoredData: () => boolean;
   saveToStorage: () => void;
   
   // Patient Management (with API integration)
@@ -32,6 +32,8 @@ interface WardStore {
   addPatient: (patient: Omit<Patient, 'id'>, bedNumber: string) => Promise<void>;
   updatePatient: (patientId: string, updates: Partial<Patient>) => Promise<void>;
   removePatient: (patientId: string) => Promise<void>;
+  deletePatient: (patientId: string) => Promise<void>;
+  endIVSession: (patientId: string) => Promise<void>;
   addIVPrescription: (patientId: string, prescription: Omit<IVPrescription, 'id'>) => void;
   updateIVPrescription: (patientId: string, prescription: Partial<IVPrescription>) => void;
   
@@ -457,6 +459,62 @@ export const useWardStore = create<WardStore>((set, get) => ({
     }
   },
 
+  // Delete patient (remove completely from system)
+  deletePatient: async (patientId: string) => {
+    await get().removePatient(patientId);
+  },
+
+  // End IV session (stop current infusion)
+  endIVSession: async (patientId: string) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      // Update patient to remove current prescription
+      await get().updatePatient(patientId, {
+        currentPrescription: undefined
+      });
+
+      // Clear pole data for this patient
+      set((state) => {
+        const newPoleData = new Map(state.poleData);
+        for (const [poleId, data] of newPoleData.entries()) {
+          if (data.patientId === patientId) {
+            newPoleData.set(poleId, {
+              ...data,
+              status: 'offline',
+              flowRate: 0,
+              currentVolume: 0,
+              percentage: 0,
+              estimatedTime: 0
+            });
+          }
+        }
+
+        return {
+          poleData: newPoleData,
+          isLoading: false
+        };
+      });
+
+      // Add completion alert
+      get().addAlert({
+        id: `ALERT_${Date.now()}`,
+        poleId: '',
+        patientId,
+        type: 'custom',
+        severity: 'info',
+        message: `${get().getPatientById(patientId)?.name}: 수액 투여가 종료되었습니다`,
+        timestamp: new Date(),
+        acknowledged: false
+      });
+
+      get().saveToStorage();
+    } catch (error) {
+      console.error('Failed to end IV session:', error);
+      set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
+    }
+  },
+
   // Load stored data from localStorage
   loadStoredData: () => {
     const storedState = storageService.loadWardState();
@@ -482,213 +540,35 @@ export const useWardStore = create<WardStore>((set, get) => ({
     storageService.saveWardState(patients, beds, alerts, poleData);
   },
 
-  // Initialize with mock data for development (only if no stored data)
+  // Initialize empty data for clean startup
   initializeMockData: () => {
-    // 먼저 저장된 데이터가 있는지 확인
-    if (get().loadStoredData()) {
-      return; // 저장된 데이터가 있으면 목업 데이터 로드하지 않음
-    }
-    const mockPatients: Patient[] = [
-      {
-        id: 'P001',
-        name: '김민지',
-        room: '301A',
-        bed: '1',
-        nurseId: 'N001',
-        nurseName: '이간호사',
-        admissionDate: new Date('2025-08-15'),
-        age: 28,
-        gender: 'female'
-      },
-      {
-        id: 'P002',
-        name: '박서준',
-        room: '301A',
-        bed: '2',
-        nurseId: 'N001',
-        nurseName: '이간호사',
-        admissionDate: new Date('2025-08-16'),
-        age: 35,
-        gender: 'male'
-      },
-      {
-        id: 'P003',
-        name: '최유진',
-        room: '301B',
-        bed: '1',
-        nurseId: 'N002',
-        nurseName: '김간호사',
-        admissionDate: new Date('2025-08-17'),
-        age: 42,
-        gender: 'female'
-      },
-      {
-        id: 'P004',
-        name: '정도현',
-        room: '301B',
-        bed: '2',
-        nurseId: 'N002',
-        nurseName: '김간호사',
-        admissionDate: new Date('2025-08-17'),
-        age: 29,
-        gender: 'male'
-      }
-    ];
+    // 기존 localStorage 데이터 완전 삭제 (목업 데이터 잔여물 제거)
+    localStorage.removeItem('wardState');
+    localStorage.removeItem('wardPatients');
+    localStorage.removeItem('wardBeds');
+    localStorage.removeItem('wardAlerts');
+    localStorage.removeItem('wardPoleData');
 
-    const mockPoleData: PoleData[] = [
-      {
-        poleId: 'POLE001',
-        patientId: 'P001',
-        weight: 425,
-        capacity: 500,
-        currentVolume: 425,
-        percentage: 85,
-        battery: 88,
-        status: 'online',
-        flowRate: 98,
-        prescribedRate: 100,
-        estimatedTime: 260,
-        lastUpdate: new Date(),
-        isButtonPressed: false
-      },
-      {
-        poleId: 'POLE002',
-        patientId: 'P002',
-        weight: 75,
-        capacity: 500,
-        currentVolume: 75,
-        percentage: 15,
-        battery: 45,
-        status: 'online',
-        flowRate: 102,
-        prescribedRate: 100,
-        estimatedTime: 44,
-        lastUpdate: new Date(),
-        isButtonPressed: false
-      },
-      {
-        poleId: 'POLE003',
-        patientId: 'P003',
-        weight: 30,
-        capacity: 1000,
-        currentVolume: 30,
-        percentage: 3,
-        battery: 92,
-        status: 'online',
-        flowRate: 95,
-        prescribedRate: 100,
-        estimatedTime: 19,
-        lastUpdate: new Date(),
-        isButtonPressed: true
-      },
-      {
-        poleId: 'POLE004',
-        patientId: 'P004',
-        weight: 0,
-        capacity: 500,
-        currentVolume: 0,
-        percentage: 0,
-        battery: 12,
-        status: 'offline',
-        flowRate: 0,
-        prescribedRate: 100,
-        estimatedTime: 0,
-        lastUpdate: new Date(Date.now() - 300000), // 5 minutes ago
-        isButtonPressed: false
-      }
+    // 빈 데이터로 초기화 - 목업 데이터 완전 제거
+    const emptyBeds: BedInfo[] = [
+      { bedNumber: '301A-1', room: '301A', status: 'empty' },
+      { bedNumber: '301A-2', room: '301A', status: 'empty' },
+      { bedNumber: '301B-1', room: '301B', status: 'empty' },
+      { bedNumber: '301B-2', room: '301B', status: 'empty' },
+      { bedNumber: '302A-1', room: '302A', status: 'empty' },
+      { bedNumber: '302A-2', room: '302A', status: 'empty' }
     ];
-
-    const mockBeds: BedInfo[] = [
-      {
-        bedNumber: '301A-1',
-        room: '301A',
-        patient: mockPatients[0],
-        poleData: mockPoleData[0],
-        status: 'occupied'
-      },
-      {
-        bedNumber: '301A-2',
-        room: '301A',
-        patient: mockPatients[1],
-        poleData: mockPoleData[1],
-        status: 'occupied'
-      },
-      {
-        bedNumber: '301B-1',
-        room: '301B',
-        patient: mockPatients[2],
-        poleData: mockPoleData[2],
-        status: 'occupied'
-      },
-      {
-        bedNumber: '301B-2',
-        room: '301B',
-        patient: mockPatients[3],
-        poleData: mockPoleData[3],
-        status: 'occupied'
-      },
-      {
-        bedNumber: '302A-1',
-        room: '302A',
-        status: 'empty'
-      },
-      {
-        bedNumber: '302A-2',
-        room: '302A',
-        status: 'empty'
-      }
-    ];
-
-    const mockAlerts: Alert[] = [
-      {
-        id: 'A001',
-        poleId: 'POLE003',
-        patientId: 'P003',
-        type: 'empty',
-        severity: 'critical',
-        message: '301B-1 최유진: 수액 소진 임박 (19분 후)',
-        timestamp: new Date(),
-        acknowledged: false
-      },
-      {
-        id: 'A002',
-        poleId: 'POLE003',
-        patientId: 'P003',
-        type: 'button_pressed',
-        severity: 'warning',
-        message: '301B-1 최유진: 환자 호출 요청',
-        timestamp: new Date(Date.now() - 120000), // 2 minutes ago
-        acknowledged: false
-      },
-      {
-        id: 'A003',
-        poleId: 'POLE002',
-        patientId: 'P002',
-        type: 'low',
-        severity: 'warning',
-        message: '301A-2 박서준: 수액 교체 준비 필요 (44분 후)',
-        timestamp: new Date(Date.now() - 300000), // 5 minutes ago
-        acknowledged: false
-      }
-    ];
-
-    // Create pole data map
-    const poleDataMap = new Map();
-    mockPoleData.forEach(pole => {
-      poleDataMap.set(pole.poleId, pole);
-    });
 
     set({
-      patients: mockPatients,
-      beds: mockBeds,
-      alerts: mockAlerts,
-      poleData: poleDataMap
+      patients: [], // 빈 환자 배열
+      beds: emptyBeds, // 빈 침대만
+      alerts: [], // 빈 알림 배열
+      poleData: new Map() // 빈 폴대 데이터
     });
 
-    // Calculate initial ward stats
+    // Calculate initial ward stats (모두 0)
     get().updateWardStats();
-    
-    // Save mock data to localStorage for persistence
-    get().saveToStorage();
+
+    console.log('✅ 목업 데이터 완전 제거됨 - 깨끗한 초기 상태');
   }
 }));

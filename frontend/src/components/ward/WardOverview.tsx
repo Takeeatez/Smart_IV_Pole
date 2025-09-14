@@ -5,6 +5,8 @@ import { useWardStore } from '../../stores/wardStore';
 import { useMQTT } from '../../hooks/useMQTT';
 import BedCard from './BedCard';
 import PatientModal from '../patient/PatientModal';
+import AlertCenter from '../alert/AlertCenter';
+import Sidebar from '../layout/Sidebar';
 
 const WardOverview: React.FC = () => {
   const navigate = useNavigate();
@@ -21,6 +23,7 @@ const WardOverview: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [selectedBedNumber, setSelectedBedNumber] = useState('');
+  const [showAlertCenter, setShowAlertCenter] = useState(false);
 
   // Update current time every minute
   useEffect(() => {
@@ -52,89 +55,7 @@ const WardOverview: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
-      <div className="w-64 bg-slate-800 text-white">
-        {/* Logo */}
-        <div className="p-6 border-b border-slate-700">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center">
-              <span className="text-white font-bold text-sm">IV</span>
-            </div>
-            <span className="font-semibold text-lg">SMART POLE</span>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="mt-6">
-          <div className="px-4 space-y-2">
-            <div className="flex items-center gap-3 p-3 bg-slate-700 rounded-lg">
-              <div className="w-5 h-5 bg-blue-400 rounded-sm flex items-center justify-center">
-                <span className="text-xs">📊</span>
-              </div>
-              <span>병동 전체</span>
-            </div>
-            <button
-              onClick={() => navigate('/patients')}
-              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left"
-            >
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">📋</span>
-              </div>
-              <span>환자 목록</span>
-            </button>
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">🏥</span>
-              </div>
-              <span>IV 폴대</span>
-            </div>
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">📈</span>
-              </div>
-              <span>모니터링</span>
-            </div>
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">🔔</span>
-              </div>
-              <span>알림</span>
-              {activeAlerts.length > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
-                  {activeAlerts.length}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">📝</span>
-              </div>
-              <span>보고서</span>
-            </div>
-          </div>
-        </nav>
-
-        {/* Bottom Section */}
-        <div className="absolute bottom-0 w-64 p-4 border-t border-slate-700">
-          <div className="flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer">
-            <div className="w-5 h-5 flex items-center justify-center">
-              <span className="text-xs">⚙️</span>
-            </div>
-            <span>설정</span>
-          </div>
-          <div className="flex items-center gap-3 mt-4">
-            <div className="w-10 h-10 bg-gray-400 rounded-full overflow-hidden">
-              <div className="w-full h-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
-                김
-              </div>
-            </div>
-            <div className="flex-1">
-              <div className="text-sm font-medium">김수연 간호사</div>
-              <div className="text-xs text-slate-400">A병동 책임간호사</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <Sidebar />
 
       {/* Main Content */}
       <div className="flex-1 p-8">
@@ -171,14 +92,17 @@ const WardOverview: React.FC = () => {
             </div>
             
             {/* Alert Bell */}
-            <div className="relative">
+            <button
+              onClick={() => setShowAlertCenter(true)}
+              className="relative p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
               <Bell className={`w-6 h-6 ${criticalAlerts.length > 0 ? 'text-red-500' : 'text-gray-600'}`} />
               {activeAlerts.length > 0 && (
                 <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
                   <span className="text-white text-xs font-bold">{activeAlerts.length}</span>
                 </div>
               )}
-            </div>
+            </button>
           </div>
         </div>
 
@@ -348,6 +272,12 @@ const WardOverview: React.FC = () => {
           setSelectedBedNumber('');
         }}
         bedNumber={selectedBedNumber}
+      />
+
+      {/* Alert Center */}
+      <AlertCenter
+        isOpen={showAlertCenter}
+        onClose={() => setShowAlertCenter(false)}
       />
     </div>
   );

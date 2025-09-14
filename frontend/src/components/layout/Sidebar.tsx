@@ -1,127 +1,158 @@
-import { 
-  Home, 
-  Activity, 
-  Users, 
-  Settings, 
-  HelpCircle,
-  ClipboardList,
-  FileText,
-  Shield,
-  MessageCircle
-} from 'lucide-react';
+import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Settings, TrendingUp } from 'lucide-react';
+import { useWardStore } from '../../stores/wardStore';
 
-interface SidebarProps {
-  activeItem?: string;
-  onNavigate?: (path: string) => void;
-}
+const Sidebar: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { getActiveAlerts } = useWardStore();
 
-const navigationItems = [
-  { 
-    id: 'dashboard', 
-    label: 'My Profile', 
-    icon: Home, 
-    path: '/dashboard' 
-  },
-  { 
-    id: 'monitoring', 
-    label: 'Prescriptions', 
-    icon: FileText, 
-    path: '/monitoring' 
-  },
-  { 
-    id: 'patients', 
-    label: 'See My Doc', 
-    icon: Users, 
-    path: '/patients' 
-  },
-  { 
-    id: 'records', 
-    label: 'Health Record', 
-    icon: ClipboardList, 
-    path: '/records' 
-  },
-  { 
-    id: 'reports', 
-    label: 'Treatment Plan', 
-    icon: Activity, 
-    path: '/reports' 
-  },
-  { 
-    id: 'alerts', 
-    label: 'Insurance', 
-    icon: Shield, 
-    path: '/alerts'
-  },
-  { 
-    id: 'support', 
-    label: 'Support', 
-    icon: HelpCircle, 
-    path: '/support' 
-  },
-  { 
-    id: 'settings', 
-    label: 'Settings', 
-    icon: Settings, 
-    path: '/settings' 
-  },
-];
+  const activeAlerts = getActiveAlerts();
 
-export default function Sidebar({ activeItem = 'dashboard', onNavigate }: SidebarProps) {
+  const navigationItems = [
+    {
+      id: 'overview',
+      path: '/',
+      label: '병동 전체',
+      icon: '📊'
+    },
+    {
+      id: 'patients',
+      path: '/patients',
+      label: '환자 목록',
+      icon: '📋'
+    },
+    {
+      id: 'devices',
+      path: '/devices',
+      label: 'IV 폴대',
+      icon: '🏥',
+      disabled: true // 추후 구현 예정
+    },
+    {
+      id: 'statistics',
+      path: '/statistics',
+      label: '통계/리포트',
+      icon: '📈'
+    },
+    {
+      id: 'alerts',
+      path: '/alerts',
+      label: '알림',
+      icon: '🔔',
+      badge: activeAlerts.length > 0 ? activeAlerts.length : undefined,
+      disabled: true // 추후 구현 예정
+    },
+    {
+      id: 'reports',
+      path: '/reports',
+      label: '보고서',
+      icon: '📝',
+      disabled: true // 추후 구현 예정
+    }
+  ];
+
+  const isCurrentPage = (path: string) => {
+    return location.pathname === path;
+  };
+
+  const handleNavigation = (path: string, disabled?: boolean) => {
+    if (disabled) return;
+    navigate(path);
+  };
+
   return (
-    <div className="w-64 bg-slate-900 text-white min-h-screen flex flex-col">
+    <div className="w-64 bg-slate-800 text-white flex flex-col">
       {/* Logo */}
-      <div className="p-6">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-cyan-500 rounded-lg flex items-center justify-center">
-            <div className="w-3 h-3 bg-white rounded-sm"></div>
+      <div className="p-6 border-b border-slate-700">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center">
+            <span className="text-white font-bold text-sm">IV</span>
           </div>
-          <h1 className="text-lg font-bold text-white">SMART IV</h1>
+          <span className="font-semibold text-lg">SMART POLE</span>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-4">
-        <ul className="space-y-2">
+      <nav className="mt-6 flex-1">
+        <div className="px-4 space-y-2">
           {navigationItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeItem === item.id;
-            
+            const isCurrent = isCurrentPage(item.path);
+            const isDisabled = item.disabled;
+
             return (
-              <li key={item.id}>
-                <button
-                  onClick={() => onNavigate?.(item.path)}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-all duration-200 ${
-                    isActive
-                      ? 'bg-cyan-500 text-white shadow-lg'
-                      : 'text-gray-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span className="font-medium text-sm">{item.label}</span>
-                </button>
-              </li>
+              <button
+                key={item.id}
+                onClick={() => handleNavigation(item.path, isDisabled)}
+                disabled={isDisabled}
+                className={`w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer text-left transition-colors ${
+                  isCurrent
+                    ? 'bg-slate-700'
+                    : isDisabled
+                    ? 'text-slate-500 cursor-not-allowed'
+                    : 'hover:bg-slate-700'
+                }`}
+              >
+                <div className={`w-5 h-5 flex items-center justify-center ${
+                  isCurrent ? 'bg-blue-400 rounded-sm' : ''
+                }`}>
+                  {item.id === 'statistics' && isCurrent ? (
+                    <TrendingUp className="w-3 h-3" />
+                  ) : (
+                    <span className="text-xs">{item.icon}</span>
+                  )}
+                </div>
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
+                    {item.badge}
+                  </span>
+                )}
+              </button>
             );
           })}
-        </ul>
+        </div>
       </nav>
 
-      {/* User Info */}
+      {/* Bottom Section */}
       <div className="p-4 border-t border-slate-700">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-cyan-500 ring-opacity-50">
-            <div className="w-full h-full bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center">
-              <span className="text-white font-semibold text-sm">이</span>
+        {/* Settings */}
+        <button
+          onClick={() => handleNavigation('/settings')}
+          className={`w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer text-left transition-colors mb-4 ${
+            isCurrentPage('/settings')
+              ? 'bg-slate-700'
+              : 'hover:bg-slate-700'
+          }`}
+        >
+          <div className={`w-5 h-5 flex items-center justify-center ${
+            isCurrentPage('/settings') ? 'bg-blue-400 rounded-sm' : ''
+          }`}>
+            {isCurrentPage('/settings') ? (
+              <Settings className="w-3 h-3" />
+            ) : (
+              <span className="text-xs">⚙️</span>
+            )}
+          </div>
+          <span>설정</span>
+        </button>
+
+        {/* User Profile */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gray-400 rounded-full overflow-hidden">
+            <div className="w-full h-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
+              김
             </div>
           </div>
           <div className="flex-1">
-            <p className="text-sm font-medium text-white">이간호사</p>
-            <p className="text-xs text-gray-400">smartiv@hospital.com</p>
+            <div className="text-sm font-medium">김수연 간호사</div>
+            <div className="text-xs text-slate-400">A병동 책임간호사</div>
           </div>
-          <button className="text-gray-400 hover:text-white transition-colors">
-            <MessageCircle className="h-4 w-4" />
-          </button>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default Sidebar;

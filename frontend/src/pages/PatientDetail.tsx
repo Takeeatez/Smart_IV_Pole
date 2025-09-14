@@ -4,20 +4,22 @@ import { ArrowLeft, Bell, Download, Droplet, Activity, Battery, Clock, AlertTria
 import { useWardStore } from '../stores/wardStore';
 import { useMQTT } from '../hooks/useMQTT';
 import { calculateProgress, calculateRemainingTime, calculateEstimatedEndTime } from '../utils/gttCalculator';
+import PatientEditModal from '../components/patient/PatientEditModal';
 
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  const { 
-    getPatientById, 
-    beds, 
-    poleData, 
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const {
+    getPatientById,
+    beds,
+    poleData,
     getActiveAlerts,
-    getCriticalAlerts 
+    getCriticalAlerts
   } = useWardStore();
-  
+
   const { isConnected } = useMQTT();
   
   const patient = id ? getPatientById(id) : undefined;
@@ -406,9 +408,12 @@ const PatientDetail: React.FC = () => {
                   </div>
                 </div>
               )}
-              
+
               <div className="space-y-2">
-                <button className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+                <button
+                  onClick={() => setShowEditModal(true)}
+                  className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                >
                   정보 수정
                 </button>
                 <button className="w-full py-2 px-4 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition-colors">
@@ -473,6 +478,15 @@ const PatientDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Patient Edit Modal */}
+      {patient && (
+        <PatientEditModal
+          patient={patient}
+          isOpen={showEditModal}
+          onClose={() => setShowEditModal(false)}
+        />
+      )}
     </div>
   );
 };

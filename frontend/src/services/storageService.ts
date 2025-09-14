@@ -47,8 +47,7 @@ class StorageService {
         admissionDate: new Date(patient.admissionDate),
         currentPrescription: patient.currentPrescription ? {
           ...patient.currentPrescription,
-          prescribedAt: new Date(patient.currentPrescription.prescribedAt),
-          createdAt: new Date(patient.currentPrescription.createdAt)
+          prescribedAt: new Date(patient.currentPrescription.prescribedAt)
         } : undefined
       }));
     } catch (error) {
@@ -77,8 +76,7 @@ class StorageService {
           admissionDate: new Date(bed.patient.admissionDate),
           currentPrescription: bed.patient.currentPrescription ? {
             ...bed.patient.currentPrescription,
-            prescribedAt: new Date(bed.patient.currentPrescription.prescribedAt),
-            createdAt: new Date(bed.patient.currentPrescription.createdAt)
+            prescribedAt: new Date(bed.patient.currentPrescription.prescribedAt)
           } : undefined
         } : undefined,
         poleData: bed.poleData ? {

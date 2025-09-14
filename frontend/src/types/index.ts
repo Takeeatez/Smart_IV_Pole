@@ -37,6 +37,8 @@ export interface Patient {
   allergies?: string[];
   currentPrescription?: IVPrescription;
   medicalHistory?: string[];
+  discharged?: boolean;
+  dischargedAt?: Date;
 }
 
 export interface PoleData {
@@ -73,7 +75,7 @@ export interface Alert {
   id: string;
   poleId: string;
   patientId?: string;
-  type: 'low' | 'empty' | 'abnormal' | 'button_pressed' | 'battery_low' | 'offline';
+  type: 'low' | 'empty' | 'abnormal' | 'button_pressed' | 'battery_low' | 'offline' | 'custom';
   severity: 'info' | 'warning' | 'critical';
   message: string;
   timestamp: Date;
