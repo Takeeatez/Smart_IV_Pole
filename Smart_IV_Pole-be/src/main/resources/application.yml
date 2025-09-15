@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: SmartPole
+
+  datasource:
+    url: jdbc:mariadb://61.245.248.178:3306/smartpole
+    username: yizy
+    password: smartpole*
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    properties:
+      hibernate:
+        format_sql: true
+        show_sql: false
+    show-sql: false
+
+  # Connection Pool (HikariCP)
+  hikari:
+    connection-timeout: 30000
+    idle-timeout: 600000
+    max-lifetime: 1800000
+    maximum-pool-size: 10
+    minimum-idle: 2
+
+server:
+  port: 8081
+
+# Logging
+logging:
+  level:
+    com.example.smartpole: INFO
+    org.hibernate.SQL: ERROR
+    org.hibernate.type.descriptor.sql.BasicBinder: ERROR
