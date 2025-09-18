@@ -1,7 +1,7 @@
 // API 서비스 레이어 - 백엔드와 통신을 위한 함수들
 // DB 스키마와 일치하는 데이터 구조 사용
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
 
 // API 응답 타입
 interface ApiResponse<T> {
@@ -11,36 +11,38 @@ interface ApiResponse<T> {
   message?: string;
 }
 
-// DB 스키마에 맞춘 타입 정의
+// DB 스키마에 맞춘 타입 정의 (실제 DB 스키마 반영)
 export interface PatientDB {
-  patient_id?: number;
+  patientId?: number;
   name: string;
-  phone: string;
-  birth_date: string;
+  phone: string; // 필수 필드 추가
+  birthDate: string; // DB에서 birth_date 필드 사용
   gender: 'male' | 'female';
-  weight?: number;
-  height?: number;
-  allergies?: string;
-  created_at?: string;
+  weightKg?: number; // DB에서 weight_kg 필드 사용
+  heightCm?: number; // DB에서 height_cm 필드 사용
+  address?: string; // DB에 address 필드 추가
+  roomId?: string; // DB에서 room_id 필드 사용
+  bedNumber?: string; // DB에서 bed_number 필드 사용
+  createdAt?: string;
 }
 
 export interface DripDB {
-  drip_id?: number;
-  drip_name: string;
+  dripId?: number;
+  dripName: string;
 }
 
 export interface IVSessionDB {
-  session_id?: number;
-  patient_id: number;
-  drip_id: number;
-  start_time: string;
-  end_time?: string;
-  end_exp_time?: string;
-  remaining_volume: number;
-  flow_rate: number;
-  iv_pole_id: string;
+  sessionId?: number;
+  patientId: number;
+  dripId: number;
+  startTime: string;
+  endTime?: string;
+  endExpTime?: string;
+  remainingVolume: number;
+  flowRate: number;
+  ivPoleId: string;
   status: 'ACTIVE' | 'PAUSED' | 'ENDED';
-  total_volume_ml: number;
+  totalVolumeMl: number;
 }
 
 export interface NurseDB {
@@ -105,7 +107,8 @@ async function apiRequest<T>(
     }
 
     const data = await response.json();
-    return { success: true, data };
+    // 백엔드에서 이미 ApiResponse 형태로 오므로 그대로 반환
+    return data;
   } catch (error) {
     console.error('API request failed:', error);
     return {
@@ -128,7 +131,7 @@ export const patientAPI = {
   },
 
   // 환자 생성
-  async createPatient(patient: Omit<PatientDB, 'patient_id' | 'created_at'>): Promise<ApiResponse<PatientDB>> {
+  async createPatient(patient: Omit<PatientDB, 'patientId' | 'createdAt'>): Promise<ApiResponse<PatientDB>> {
     return apiRequest<PatientDB>('/patients', {
       method: 'POST',
       body: JSON.stringify(patient),
@@ -171,17 +174,17 @@ export const dripAPI = {
 export const ivSessionAPI = {
   // 현재 활성 세션 조회
   async getActiveSessions(): Promise<ApiResponse<IVSessionDB[]>> {
-    return apiRequest<IVSessionDB[]>('/iv-sessions/active');
+    return apiRequest<IVSessionDB[]>('/infusions/active');
   },
 
   // 특정 환자의 현재 세션 조회
   async getPatientSession(patientId: number): Promise<ApiResponse<IVSessionDB>> {
-    return apiRequest<IVSessionDB>(`/iv-sessions/patient/${patientId}`);
+    return apiRequest<IVSessionDB>(`/infusions/patient/${patientId}`);
   },
 
   // 새로운 세션 시작
-  async createSession(session: Omit<IVSessionDB, 'session_id'>): Promise<ApiResponse<IVSessionDB>> {
-    return apiRequest<IVSessionDB>('/iv-sessions', {
+  async createSession(session: Omit<IVSessionDB, 'sessionId'>): Promise<ApiResponse<IVSessionDB>> {
+    return apiRequest<IVSessionDB>('/infusions', {
       method: 'POST',
       body: JSON.stringify(session),
     });
@@ -189,7 +192,7 @@ export const ivSessionAPI = {
 
   // 세션 업데이트
   async updateSession(sessionId: number, updates: Partial<IVSessionDB>): Promise<ApiResponse<IVSessionDB>> {
-    return apiRequest<IVSessionDB>(`/iv-sessions/${sessionId}`, {
+    return apiRequest<IVSessionDB>(`/infusions/${sessionId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
@@ -197,7 +200,7 @@ export const ivSessionAPI = {
 
   // 세션 종료
   async endSession(sessionId: number): Promise<ApiResponse<void>> {
-    return apiRequest<void>(`/iv-sessions/${sessionId}/end`, {
+    return apiRequest<void>(`/infusions/${sessionId}/end`, {
       method: 'POST',
     });
   },

@@ -17,11 +17,12 @@ const PatientModal: React.FC<PatientModalProps> = ({
   bedNumber,
   patient
 }) => {
-  const { addPatient, updatePatient, addIVPrescription } = useWardStore();
-  
+  const { addPatient, updatePatient, addIVPrescription, fetchPatients, beds } = useWardStore();
+
   // Patient form state
   const [patientForm, setPatientForm] = useState({
     name: '',
+    phone: '',
     age: '',
     gender: 'female' as 'male' | 'female',
     weight: '',
@@ -30,6 +31,9 @@ const PatientModal: React.FC<PatientModalProps> = ({
     nurseId: 'N001',
     nurseName: '김수연'
   });
+
+  // Selected bed state for when bedNumber is not provided
+  const [selectedBed, setSelectedBed] = useState<string>(bedNumber || '');
 
   // IV Prescription form state
   const [prescriptionForm, setPrescriptionForm] = useState({
@@ -52,6 +56,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
     if (patient) {
       setPatientForm({
         name: patient.name,
+        phone: patient.phone || '',
         age: patient.age.toString(),
         gender: patient.gender,
         weight: patient.weight?.toString() || '',
@@ -74,6 +79,11 @@ const PatientModal: React.FC<PatientModalProps> = ({
     }
   }, [patient]);
 
+  // Update selectedBed when bedNumber prop changes
+  useEffect(() => {
+    setSelectedBed(bedNumber || '');
+  }, [bedNumber]);
+
   // Calculate GTT and flow rate when form values change
   useEffect(() => {
     const volume = parseFloat(prescriptionForm.totalVolume) || 0;
@@ -92,13 +102,27 @@ const PatientModal: React.FC<PatientModalProps> = ({
     }
   }, [prescriptionForm.totalVolume, prescriptionForm.duration, prescriptionForm.gttFactor]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Use selectedBed if bedNumber is not provided
+    const finalBedNumber = bedNumber || selectedBed;
+
+    // Validation: bed must be selected
+    if (!finalBedNumber) {
+      alert('침대를 선택해주세요.');
+      return;
+    }
+
+    // 🔄 Fix room/bed mapping to match database structure
+    // bedNumber format: "301A-1" -> room: "301A", bed: "1"
+    const [roomPart, bedPart] = finalBedNumber.split('-');
+
     const patientData: Omit<Patient, 'id'> = {
       name: patientForm.name,
-      room: bedNumber.split('-')[0],
-      bed: bedNumber,
+      phone: patientForm.phone || undefined,
+      room: roomPart,           // "301A", "301B", etc.
+      bed: bedPart,             // "1", "2", etc.
       age: parseInt(patientForm.age),
       gender: patientForm.gender,
       weight: patientForm.weight ? parseFloat(patientForm.weight) : undefined,
@@ -112,8 +136,8 @@ const PatientModal: React.FC<PatientModalProps> = ({
 
     if (patient) {
       // Update existing patient
-      updatePatient(patient.id, patientData);
-      
+      await updatePatient(patient.id, patientData);
+
       // Update IV prescription if provided
       if (prescriptionForm.medicationName && prescriptionForm.totalVolume && prescriptionForm.duration) {
         addIVPrescription(patient.id, {
@@ -129,31 +153,26 @@ const PatientModal: React.FC<PatientModalProps> = ({
         });
       }
     } else {
-      // Add new patient
-      addPatient(patientData, bedNumber);
-      
-      // Add IV prescription if provided
-      if (prescriptionForm.medicationName && prescriptionForm.totalVolume && prescriptionForm.duration) {
-        // Since we don't have the patient ID yet, we'll need to get it after creation
-        setTimeout(() => {
-          const beds = useWardStore.getState().beds;
-          const bed = beds.find(b => b.bedNumber === bedNumber);
-          if (bed?.patient) {
-            addIVPrescription(bed.patient.id, {
-              medicationName: prescriptionForm.medicationName,
-              totalVolume: parseFloat(prescriptionForm.totalVolume),
-              duration: parseFloat(prescriptionForm.duration),
-              gttFactor: prescriptionForm.gttFactor,
-              prescribedBy: prescriptionForm.prescribedBy,
-              notes: prescriptionForm.notes,
-              calculatedGTT: calculatedValues.gtt,
-              calculatedFlowRate: calculatedValues.flowRate,
-              prescribedAt: new Date()
-            });
-          }
-        }, 100);
-      }
+      // Add new patient with prescription (통합 처리)
+      const prescription = (prescriptionForm.medicationName && prescriptionForm.totalVolume && prescriptionForm.duration) ? {
+        medicationName: prescriptionForm.medicationName,
+        totalVolume: parseFloat(prescriptionForm.totalVolume),
+        duration: parseFloat(prescriptionForm.duration),
+        gttFactor: prescriptionForm.gttFactor,
+        prescribedBy: prescriptionForm.prescribedBy,
+        notes: prescriptionForm.notes,
+        calculatedGTT: calculatedValues.gtt,
+        calculatedFlowRate: calculatedValues.flowRate,
+        prescribedAt: new Date()
+      } : undefined;
+
+      await addPatient(patientData, finalBedNumber, prescription);
     }
+
+    // 성공적으로 추가 후 1초 뒤 데이터 새로고침
+    setTimeout(() => {
+      fetchPatients();
+    }, 1000);
 
     onClose();
   };
@@ -161,6 +180,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
   const resetForm = () => {
     setPatientForm({
       name: '',
+      phone: '',
       age: '',
       gender: 'female',
       weight: '',
@@ -193,7 +213,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <User className="w-6 h-6 text-blue-600" />
-            {patient ? '환자 정보 수정' : '신규 환자 등록'} - {bedNumber}
+            {patient ? '환자 정보 수정' : '신규 환자 등록'} {bedNumber && `- ${bedNumber}`}
           </h2>
           <button
             onClick={handleClose}
@@ -204,6 +224,41 @@ const PatientModal: React.FC<PatientModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6">
+          {/* Bed Selection - Show only when bedNumber is not provided */}
+          {!bedNumber && !patient && (
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                침대 선택 *
+              </label>
+              <select
+                value={selectedBed}
+                onChange={(e) => setSelectedBed(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              >
+                <option value="">침대를 선택하세요</option>
+                {beds
+                  .filter(bed => bed.status === 'empty' || !bed.patient)
+                  .map(bed => (
+                    <option key={bed.bedNumber} value={bed.bedNumber}>
+                      {bed.bedNumber} - 빈 침대
+                    </option>
+                  ))}
+              </select>
+              {beds.filter(bed => bed.status === 'empty' || !bed.patient).length === 0 && (
+                <p className="mt-2 text-sm text-red-600">현재 사용 가능한 빈 침대가 없습니다.</p>
+              )}
+            </div>
+          )}
+
+          {/* Show current bed for existing patient */}
+          {bedNumber && (
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+              <div className="text-sm text-gray-600">배정된 침대</div>
+              <div className="text-lg font-semibold text-gray-900">{bedNumber}</div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Patient Information */}
             <div className="space-y-6">
@@ -229,6 +284,21 @@ const PatientModal: React.FC<PatientModalProps> = ({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    전화번호
+                  </label>
+                  <input
+                    type="tel"
+                    value={patientForm.phone}
+                    onChange={(e) => setPatientForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="010-0000-0000"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     나이 *
                   </label>
                   <input
@@ -242,9 +312,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
                     placeholder="나이"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     성별 *
@@ -258,7 +326,9 @@ const PatientModal: React.FC<PatientModalProps> = ({
                     <option value="male">남성</option>
                   </select>
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     체중 (kg)

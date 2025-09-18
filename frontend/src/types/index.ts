@@ -25,6 +25,7 @@ export interface IVPrescription {
 export interface Patient {
   id: string;
   name: string;
+  phone?: string; // 전화번호 추가 (선택적)
   room: string;
   bed: string;
   nurseId: string;

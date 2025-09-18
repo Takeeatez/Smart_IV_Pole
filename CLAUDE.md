@@ -37,285 +37,216 @@ The project follows a modular retrofit design with these main components:
 [Sensors] → [MCU + BLE/Wi-Fi] → [Cloud/Hospital Server] → [Apps/Dashboard]
 ```
 
-## Key Algorithms
+## Technology Stack
 
-### Infusion Rate Calculation
-- Primary input from nurse's manual entry for accuracy
-- Load cell measurements as supplementary accuracy enhancement
-- Stable value detection (3+ seconds without movement) before measurement
-- Weight-based flow rate monitoring (mL/min) when stable
-- Moving average filters for noise reduction
-- Real-time consumption tracking with depletion time calculation
+### Backend (Spring Boot)
+- **Framework**: Spring Boot 3.5.5 with Java 21
+- **Database**: MariaDB with Hibernate JPA
+- **Configuration**: Hibernate DDL auto-create, external MariaDB server
+- **Port**: 8081 (configured in application.yml)
+- **Dependencies**: Spring Web, Spring Data JPA, Validation, WebFlux, Lombok
 
-### Predictive Modeling  
-- Remaining time estimation based on stable weight reduction trends
-- Linear regression for depletion forecasting during stable periods
-- Adaptive thresholds for patient-specific patterns
+### Frontend (React Dashboard)
+- **Framework**: React 19 with TypeScript
+- **Build System**: Vite 7.1.2 with hot reload
+- **Styling**: Tailwind CSS 4.0 + Radix UI primitives
+- **State Management**: Zustand with persistence
+- **Routing**: React Router v7
+- **Icons**: Lucide React
+- **Port**: 5173 (Vite default)
 
-### Anomaly Detection
-- Flow rate change detection
-- Infusion stoppage monitoring
-- Low fluid level alerts (10% threshold for warnings)
-- Sensor malfunction detection
-
-## Technology Stack (확정)
-
-### Backend
-- **Framework**: Spring Boot (Java)
-- **Database**: MariaDB
-- **Message Broker**: MQTT (Eclipse Mosquitto)
-- **Build Tool**: Maven/Gradle
-
-### Frontend (간호사 대시보드)
-- **Framework**: React
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui
-- **State Management**: Zustand
-- **Data Fetching**: React Query
-- **Real-time**: MQTT.js (WebSocket over MQTT)
-
-### Mobile App
-- **Framework**: Flutter
-- **Language**: Dart
-- **State Management**: Provider/Riverpod
-- **MQTT Client**: mqtt_client package
-
-### Hardware
-- **MCU**: ESP32
-- **MQTT Library**: PubSubClient
-- **Sensors**: HX711 (Load Cell), LED, Button
-- **Development**: Arduino IDE / PlatformIO
+### Database Schema (MariaDB)
+- **patients**: Patient info with room_id and bed_number for bed assignment persistence
+- **drip_types**: IV fluid types and medications
+- **infusion_sessions**: Active IV sessions with real-time monitoring data
+- **alert_logs**: Medical alerts with severity levels and acknowledgment tracking
+- **nurses**: Staff authentication and role management
+- **poles**: Hardware device status and battery monitoring
 
 ## Development Commands
 
 ### Backend (Spring Boot)
-- **Location**: `Smart_IV_Pole-be/` directory
-- **Port**: Runs on port 8081 (configured in `application.properties`)
 ```bash
 cd Smart_IV_Pole-be/
-./gradlew bootRun         # 개발 서버 실행 (port 8081)
-./gradlew test            # 테스트 실행
-./gradlew build          # 빌드
-./gradlew clean build    # 클린 빌드
+./gradlew bootRun         # Start development server (port 8081)
+./gradlew test            # Run tests
+./gradlew build          # Build application
+./gradlew clean build    # Clean build
 ```
 
 ### Frontend (React)
-- **Location**: `frontend/` directory  
-- **Port**: Development server on port 5173 (Vite default)
-- **Build System**: Vite with TypeScript and React 19
 ```bash
 cd frontend/
-npm install               # 의존성 설치
-npm run dev              # 개발 서버 (Vite) - http://localhost:5173
-npm run build            # TypeScript 컴파일 + Vite 프로덕션 빌드
-npm run lint             # ESLint 코드 검사
-npm run preview          # 빌드 결과 미리보기
+npm install               # Install dependencies
+npm run dev              # Start development server (port 5173)
+npm run build            # Production build (TypeScript + Vite)
+npm run lint             # ESLint code quality check
+npm run preview          # Preview production build
 ```
 
-### Database & MQTT
-```bash
-# MariaDB 컨테이너 실행 (if using Docker)
-docker-compose up -d mariadb    
+### Development Workflow
+1. Start backend: `cd Smart_IV_Pole-be && ./gradlew bootRun`
+2. Start frontend: `cd frontend && npm run dev`
+3. Access application: http://localhost:5173
+4. Backend API: http://localhost:8081/api/v1
 
-# MQTT 브로커 실행 (if using Docker)  
-docker-compose up -d mosquitto  
-```
+## Core Medical Algorithm - GTT Calculator
 
-### Mobile (Flutter)
-```bash
-flutter pub get           # 의존성 설치
-flutter run              # 개발 실행
-flutter build apk        # Android 빌드
-flutter build ios        # iOS 빌드
-```
-
-## Project Structure
-
-```
-Smart_IV_Pole/
-├── Smart_IV_Pole-be/    # Spring Boot 서버 (port 8081)
-│   ├── src/main/java/
-│   ├── src/main/resources/
-│   │   └── application.properties  # 서버 포트 8081 설정
-│   └── build.gradle                # Gradle 빌드 설정
-├── frontend/            # React 간호사 대시보드 (port 5173)
-│   ├── src/
-│   │   ├── components/  # 재사용 가능한 컴포넌트
-│   │   │   ├── layout/  # 레이아웃 컴포넌트
-│   │   │   ├── ward/    # 병동 관련 컴포넌트
-│   │   │   └── patient/ # 환자 관련 컴포넌트
-│   │   ├── hooks/       # 커스텀 훅 (MQTT 연결 등)
-│   │   ├── services/    # API 서비스 & localStorage 관리
-│   │   │   ├── api.ts              # 백엔드 API 연동
-│   │   │   └── storageService.ts   # 로컬 데이터 영속성
-│   │   ├── stores/      # Zustand 상태 관리
-│   │   │   └── wardStore.ts        # 중앙 상태 관리
-│   │   ├── types/       # TypeScript 타입 정의
-│   │   ├── utils/       # 유틸리티 (GTT 계산기 등)
-│   │   └── pages/       # 페이지 컴포넌트
-│   ├── public/
-│   ├── package.json
-│   └── CLAUDE.md        # 프론트엔드 전용 가이드
-├── mobile/              # Flutter 앱 (계획)
-├── hardware/            # ESP32 펌웨어 (계획)
-├── DB/                  # 데이터베이스 스키마
-└── README.md            # 프로젝트 전체 개요
-```
-
-## Security & Privacy Considerations
-
-- Location tracking limited to hospital premises
-- Caregiver app requires QR code/access code authentication
-- All communications encrypted with TLS/SSL
-- Minimal patient data storage with anonymization
-- Role-based access control (admin/nurse/caregiver permissions)
-- Medical device compliance preparation (KC certification, medical device approval)
-
-## MQTT Topic Structure
-
-### Device Topics
-- `pole/{poleId}/status` - 폴대 온라인/오프라인 상태
-- `pole/{poleId}/weight` - 로드셀 무게 데이터 (실시간)
-- `pole/{poleId}/battery` - 배터리 잔량
-- `pole/{poleId}/button` - 호출 버튼 이벤트
-
-### Alert Topics
-- `alert/{poleId}/low` - 수액 부족 알림 (10% 미만)
-- `alert/{poleId}/empty` - 수액 소진 알림
-- `alert/{poleId}/abnormal` - 비정상 상태 감지
-
-### Dashboard Topics
-- `dashboard/update` - 대시보드 전체 업데이트
-- `nurse/{nurseId}/alert` - 간호사별 알림
-- `ward/{wardId}/status` - 병동별 상태 업데이트
-
-## Database Schema
-
-### Core Tables
-- **patients** - 환자 정보 (id, name, room, bed)
-- **iv_poles** - 폴대 장치 정보 (id, status, battery_level)
-- **iv_sessions** - 수액 투여 세션 (id, patient_id, pole_id, start_time, volume)
-- **measurements** - 센서 측정값 시계열 데이터 (timestamp, pole_id, weight, flow_rate)
-- **alerts** - 알림 이력 (id, type, pole_id, timestamp, acknowledged)
-- **nurses** - 간호사 정보 (id, name, ward, role)
-
-## Development Workflow
-
-### Phase 1: API 설계 & Mock 구현 (1-2주)
-1. Spring Boot REST API 설계
-2. MariaDB 스키마 설계
-3. MQTT 토픽 구조 정의
-4. Mock 데이터 생성
-
-### Phase 2: 핵심 기능 개발 (3-4주)
-1. Spring Boot API 구현
-2. React 대시보드 UI 구현
-3. MQTT 통신 연동
-4. ESP32 시뮬레이터 개발
-
-### Phase 3: 통합 & 테스트 (2-3주)
-1. 실제 하드웨어 연동
-2. Flutter 앱 개발
-3. 전체 시스템 테스트
-
-## Core Medical Algorithm
-
-### GTT (점적수) Calculation System
-The most critical component is the **GTT calculator** that bridges manual nurse input with real-time sensor data:
+The **GTT (점적 수) calculation system** is the core differentiator that bridges manual nurse input with real-time sensor data:
 
 - **Primary Input**: Nurse manual entry for medication volume, duration, and GTT factor
 - **Formula**: `(총 용량 × GTT factor) / 투여 시간(분)` where GTT factor is 20 (macro) or 60 (micro)
 - **Real-time Monitoring**: ESP32 load cell data provides accuracy verification
 - **Status Algorithm**: Compare expected vs. actual depletion rates:
-  - **정상 (Normal)**: Actual rate within ±10% of calculated rate  
+  - **정상 (Normal)**: Actual rate within ±10% of calculated rate
   - **주의 (Warning)**: 10-20% deviation from expected rate
   - **응급 (Critical)**: >20% deviation - major discrepancy requiring immediate attention
 
-This algorithm is the **core differentiator** - providing intelligent early warning when actual IV consumption significantly deviates from nurse's initial calculations.
+Located in `frontend/src/utils/gttCalculator.ts` with medical-grade precision.
 
-## Frontend Architecture
+## Critical Architecture Patterns
 
-### State Management with Data Persistence
-- **wardStore.ts**: Central Zustand store managing all ward data with localStorage persistence
-- **storageService.ts**: Handles local data persistence - prevents data loss on refresh/navigation
-- **Real-time Updates**: Mock MQTT simulation with persistent state across sessions
+### Bed Assignment Persistence System
+**Problem Solved**: Patients stay assigned to specific beds (301A-1 through 301A-6) after page navigation/refresh.
 
-### API Integration
-- **Backend Connection**: Automatically connects to Spring Boot server on port 8081
-- **Offline Mode**: Falls back to localStorage when backend unavailable
-- **Data Synchronization**: Server data takes priority, with local persistence as fallback
+**Implementation**:
+1. **Database Storage**: `room_id` and `bed_number` columns in patients table
+2. **Priority System**: DB bed info → localStorage mapping → existing data → defaults
+3. **Conversion Logic**: `convertDBPatientToFrontend()` in wardStore.ts handles bed assignment priority
+4. **Real-time Sync**: `fetchPatients()` automatically syncs DB changes to frontend
 
-### Component Architecture
-- **WardOverview**: Main dashboard with 6-bed grid and real-time status monitoring
-- **PatientList**: Comprehensive patient management with search and detailed IV tracking
-- **PatientModal**: Patient registration/editing with GTT prescription calculator
-- **Real-time Navigation**: Data persists across all routes and page refreshes
+```typescript
+// Key function: wardStore.ts convertDBPatientToFrontend()
+if (dbPatient.roomId && dbPatient.bedNumber) {
+  // DB bed info takes priority
+  room = dbPatient.roomId;
+  bed = dbPatient.bedNumber;
+} else if (patientBedMapping?.has(patientId)) {
+  // Fallback to localStorage mapping
+  const bedNumber = patientBedMapping.get(patientId)!;
+}
+```
+
+### State Management Architecture (Zustand)
+**Central Store**: `frontend/src/stores/wardStore.ts`
+- **Hybrid Persistence**: Database + localStorage for offline resilience
+- **Real-time Updates**: Mock MQTT simulation with database sync
+- **API Integration**: Automatic server connection with graceful fallback
+- **Bed Mapping**: Patient-bed relationship management with persistence
+
+**Key Actions**:
+- `fetchPatients()`: Load patients from database with bed assignment
+- `addPatient()`: Create patient with bed assignment in database
+- `checkConnection()`: Test backend connectivity and sync data
+- `convertDBPatientToFrontend()`: Handle bed assignment priority logic
 
 ### Data Flow Architecture
 ```
-ESP32 Sensors → MQTT → Backend (port 8081) → Frontend API calls → wardStore → localStorage
-                                                                      ↓
-                                                            UI Components (persistent)
+ESP32 Sensors → MQTT → Spring Boot API (port 8081) → MariaDB
+                                    ↓
+Frontend (port 5173) → Zustand Store → localStorage backup
+                                    ↓
+React Components (persistent across navigation)
 ```
 
-### Key Features Implemented
-- ✅ **Data Persistence**: localStorage prevents data loss on navigation/refresh
-- ✅ **Backend Integration**: Automatic server connection with offline fallback
-- ✅ **Patient Management**: Full CRUD operations with GTT prescription calculator
-- ✅ **Ward Monitoring**: 6-bed dashboard with color-coded real-time status
-- ✅ **Alert System**: Priority-based notifications with acknowledgment tracking
-- ✅ **GTT Calculator**: Medical-grade IV infusion rate calculations
-- 🚧 Individual patient detail pages (planned)
-- 🚧 ESP32 hardware integration (in development)
+### Component Architecture
+- **WardOverview**: Main dashboard with 6-bed grid layout and real-time monitoring
+- **PatientList**: Comprehensive patient management with search and GTT calculator
+- **PatientModal**: Patient registration with bed selection and IV prescription setup
+- **BedCard**: Individual bed status with color-coded visual indicators
 
-## Notes for Implementation
+## Key Features Implemented
 
-- Focus on modular design for easy integration with existing hospital infrastructure
-- Prioritize user-friendly interfaces for medical staff adoption
-- Implement robust error handling and fallback mechanisms for critical alerts
-- Plan for scalability to support multiple concurrent pole monitoring
-- Consider integration points with existing hospital EMR and call systems
+- ✅ **Database Integration**: Full Spring Boot + MariaDB backend with RESTful API
+- ✅ **Bed Assignment Persistence**: room_id + bed_number database columns with priority system
+- ✅ **Patient Management**: Complete CRUD operations with automatic bed assignment
+- ✅ **Ward Monitoring**: 6-bed dashboard with real-time status and color coding
+- ✅ **GTT Calculator**: Medical-grade IV infusion rate calculations with nurse workflow
+- ✅ **Alert System**: Priority-based notifications with severity levels
+- ✅ **Offline Resilience**: localStorage backup when backend unavailable
+- ✅ **Data Synchronization**: Automatic sync between frontend and database
+- 🚧 ESP32 hardware integration (in development - currently mock data)
+- 🚧 Real MQTT broker integration (planned)
 
-## Nurse Dashboard Specific Requirements
+## MQTT Topic Structure (Planned)
 
-### UI/UX Principles
+### Device Topics
+- `pole/{poleId}/status` - Device online/offline status
+- `pole/{poleId}/weight` - Real-time load cell data
+- `pole/{poleId}/battery` - Battery level monitoring
+- `pole/{poleId}/button` - Emergency call button events
+
+### Alert Topics
+- `alert/{poleId}/low` - Low fluid alerts (<10%)
+- `alert/{poleId}/empty` - Empty fluid alerts
+- `alert/{poleId}/abnormal` - Abnormal flow rate detection
+
+## Common Development Tasks
+
+### Adding New Patient
+1. Use `wardStore.addPatient()` with bed assignment
+2. Backend automatically stores in database with room_id/bed_number
+3. Frontend updates immediately with bed persistence
+
+### Debugging Bed Assignment Issues
+1. Check `convertDBPatientToFrontend()` priority logic in wardStore.ts
+2. Verify database has room_id and bed_number columns populated
+3. Confirm `fetchPatients()` is called on page navigation
+
+### Backend Entity Changes
+1. Modify entity in `Smart_IV_Pole-be/src/main/java/com/example/smartpole/entity/`
+2. Restart Spring Boot (`./gradlew bootRun`) to pick up changes
+3. Hibernate DDL auto-create will update database schema
+4. Update frontend TypeScript interfaces in `frontend/src/services/api.ts`
+
+### Testing Backend Connectivity
+```bash
+# Test patients API
+curl http://localhost:8081/api/v1/patients
+
+# Test patient creation
+curl -X POST http://localhost:8081/api/v1/patients \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test Patient","phone":"010-1234-5678","birthDate":"1990-01-01","gender":"male","roomId":"301A","bedNumber":"2"}'
+```
+
+## Medical Compliance & UI Standards
+
+### Color Coding Standards
+- 🟢 **Green (30%+ fluid)**: Normal operation, no intervention needed
+- 🟡 **Orange (10-30% fluid)**: Attention needed, prepare for change
+- 🔴 **Red (<10% fluid)**: Critical/Emergency, immediate action required
+- ⚫ **Gray**: Offline or hardware disconnected
+
+### UI/UX Requirements
 - **3-Click Rule**: All major functions accessible within 3 clicks
-- **Color Standardization**: Red (Emergency), Orange (Warning), Green (Normal), Gray (Inactive)
-- **Touch-Friendly Design**: Minimum touch area of 44px × 44px for mobile/tablet use
-- **Real-time Updates**: 1-second interval refresh via WebSocket
-
-### Key Features to Implement
-1. **Main Dashboard**: Ward-wide status overview with visual gauge bars
-2. **Alert Management**: Priority-sorted alerts with quick acknowledgment
-3. **Patient Details**: Quick patient info cards with action buttons
-4. **Patient Registration**: Simplified form for new patient IV setup
-5. **Work Efficiency Tools**: Nurse workload distribution and scheduling
-6. **Automated Records**: 5R checklist automation and hourly logs
-7. **Statistics/Reports**: Daily performance metrics and trend analysis
-8. **Mobile Optimization**: Responsive design for tablet use during rounds
-
-### Data Integration Notes
-- ESP32 load cell values must be received and displayed in real-time
-- Gray status indicators when hardware is disconnected or under development
-- Nurse manual input takes priority over sensor readings for accuracy
+- **Touch-Friendly**: Minimum 44px touch targets for tablet use
+- **Real-time Updates**: 1-second interval refresh for critical monitoring
+- **Medical Workflow**: Nurse receives prescription → inputs → calculates → monitors
 
 ## Development Guidelines
 
 ### Frontend Development
-- **Entry Point**: `frontend/src/App.tsx` - currently renders WardOverview as main page
-- **Adding Components**: Place reusable components in `src/components/` with appropriate subdirectories
-- **State Updates**: Use wardStore methods for consistent state management across components
-- **Styling**: Tailwind CSS 4.0 with `@import "tailwindcss"` syntax in index.css
-- **Icons**: Use Lucide React icons for consistency
+- **Entry Point**: `frontend/src/App.tsx` renders WardOverview as main dashboard
+- **State Management**: Use wardStore methods for consistent state across components
+- **API Integration**: All backend calls go through `frontend/src/services/api.ts`
+- **Styling**: Tailwind CSS 4.0 with `@import "tailwindcss"` syntax
+- **Icons**: Use Lucide React for consistency
 
-### MQTT Integration Patterns
-- Use `useMQTT()` hook for real-time data connections
-- Mock data automatically simulates hardware scenarios during development
-- Follow MQTT topic structure: `pole/{poleId}/weight`, `alert/{poleId}/low`, etc.
-- Gray status automatically shows when hardware is offline or under development
+### Backend Development
+- **Entity Changes**: Always restart Spring Boot after entity modifications
+- **Database**: Hibernate auto-creates schema, use migration scripts for production
+- **API Responses**: Follow `ApiResponse<T>` wrapper pattern for consistency
+- **CORS**: Configured for frontend development server
 
-### Color Coding Standards
-- 🟢 Green (30%+ fluid): Normal operation
-- 🟡 Orange (10-30% fluid): Attention needed
-- 🔴 Red (<10% fluid): Critical/Emergency
-- ⚫ Gray: Offline or hardware disconnected
+### MQTT Integration (Future)
+- Use `useMQTT()` hook for real-time connections
+- Mock implementation in `frontend/src/hooks/useMQTT.ts`
+- Real implementation planned for `useRealMQTT()` function
+- Topic structure documented above for ESP32 integration
+
+### Important Notes
+- **Bed Assignment**: Database persistence is critical - always include room_id and bed_number
+- **Page Navigation**: WardOverview calls `fetchPatients()` on every entry for fresh data
+- **Offline Mode**: Frontend gracefully falls back to localStorage when backend unavailable
+- **Medical Accuracy**: GTT calculations follow hospital protocols with proper rounding

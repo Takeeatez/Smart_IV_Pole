@@ -25,8 +25,8 @@ public class Patient {
     @Column(name = "name", nullable = false, length = 50)
     private String name;
 
-    @Column(name = "phone", nullable = false, length = 20)
-    private String phone = "010-1234-4567"; // 기본값
+    @Column(name = "phone", length = 20)
+    private String phone;
 
     @Column(name = "birth_date", nullable = false)
     private LocalDate birthDate;
@@ -45,6 +45,12 @@ public class Patient {
 
     @Column(name = "address")
     private String address;
+
+    @Column(name = "room_id", length = 10)
+    private String roomId; // 병실 번호 (예: 301A)
+
+    @Column(name = "bed_number", length = 5)
+    private String bedNumber; // 침대 번호 (예: 1, 2, 3, 4, 5, 6)
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

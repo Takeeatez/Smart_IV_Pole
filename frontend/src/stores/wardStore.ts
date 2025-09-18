@@ -15,6 +15,7 @@ interface WardStore {
   isLoading: boolean;
   error: string | null;
   isServerConnected: boolean;
+  patientBedMapping: Map<string, string>; // patientId -> bedNumber mapping
   
   // Actions
   updatePoleData: (poleId: string, data: Partial<PoleData>) => void;
@@ -29,7 +30,7 @@ interface WardStore {
   
   // Patient Management (with API integration)
   fetchPatients: () => Promise<void>;
-  addPatient: (patient: Omit<Patient, 'id'>, bedNumber: string) => Promise<void>;
+  addPatient: (patient: Omit<Patient, 'id'>, bedNumber: string, prescription?: Omit<IVPrescription, 'id'>) => Promise<void>;
   updatePatient: (patientId: string, updates: Partial<Patient>) => Promise<void>;
   removePatient: (patientId: string) => Promise<void>;
   deletePatient: (patientId: string) => Promise<void>;
@@ -58,15 +59,84 @@ const getStatusColor = (poleData?: PoleData): StatusColor => {
 };
 
 // Helper function to convert DB patient to frontend Patient type
-const convertDBPatientToFrontend = (dbPatient: PatientDB): Omit<Patient, 'id' | 'room' | 'bed' | 'nurseId' | 'nurseName' | 'admissionDate'> => ({
-  name: dbPatient.name,
-  age: new Date().getFullYear() - new Date(dbPatient.birth_date).getFullYear(),
-  gender: dbPatient.gender,
-  weight: dbPatient.weight,
-  height: dbPatient.height,
-  allergies: dbPatient.allergies ? dbPatient.allergies.split(',').map(a => a.trim()) : undefined,
-  medicalHistory: []
-});
+// 매핑 테이블을 사용하여 올바른 침대 할당
+const convertDBPatientToFrontend = (dbPatient: PatientDB, existingPatient?: Patient, patientBedMapping?: Map<string, string>): Patient => {
+  const patientId = `P${dbPatient.patientId}`;
+
+  // 🔄 NEW: DB에서 침대 정보를 직접 사용 (매핑 시스템보다 우선)
+  // 1. DB에서 침대 정보 사용 (최우선)
+  // 2. 없으면 매핑 테이블에서 침대 정보 찾기
+  // 3. 없으면 기존 환자 정보 사용
+  // 4. 모두 없으면 기본값 사용
+  let room = '301A';
+  let bed = '1';
+
+  if (dbPatient.roomId && dbPatient.bedNumber) {
+    // DB에 침대 정보가 있으면 우선 사용
+    room = dbPatient.roomId;
+    bed = dbPatient.bedNumber;
+    console.log(`🏥 Using DB bed info for ${dbPatient.name}: ${room}-${bed}`);
+  } else if (patientBedMapping?.has(patientId)) {
+    // DB에 없으면 매핑 테이블 사용
+    const bedNumber = patientBedMapping.get(patientId)!;
+    const [roomPart, bedPart] = bedNumber.split('-');
+    room = roomPart;
+    bed = bedPart;
+    console.log(`🗺️ Using bed mapping for ${dbPatient.name}: ${patientId} → ${bedNumber}`);
+  } else if (existingPatient) {
+    // 매핑도 없으면 기존 환자 정보 사용
+    room = existingPatient.room;
+    bed = existingPatient.bed;
+    console.log(`👤 Using existing patient data for ${dbPatient.name}: ${room}-${bed}`);
+  } else {
+    // 모든 정보가 없으면 기본값
+    console.log(`🏥 Using default bed for ${dbPatient.name}: ${room}-${bed}`);
+  }
+
+  const nurseId = existingPatient?.nurseId || 'N001';
+  const nurseName = existingPatient?.nurseName || '김수연';
+
+  return {
+    id: patientId,
+    name: dbPatient.name,
+    room: room,
+    bed: bed,
+    nurseId: nurseId,
+    nurseName: nurseName,
+    admissionDate: new Date(dbPatient.createdAt || Date.now()),
+    age: dbPatient.birthDate ? new Date().getFullYear() - new Date(dbPatient.birthDate).getFullYear() : 0,
+    gender: dbPatient.gender,
+    weight: dbPatient.weightKg,
+    height: dbPatient.heightCm,
+    allergies: existingPatient?.allergies || undefined,
+    medicalHistory: existingPatient?.medicalHistory || [],
+    currentPrescription: existingPatient?.currentPrescription,
+    phone: dbPatient.phone
+  };
+};
+
+// Helper function to convert frontend Patient to DB PatientDB type
+const convertFrontendPatientToDB = (patient: Omit<Patient, 'id'>, bedNumber: string, phone?: string): Omit<PatientDB, 'patientId' | 'createdAt'> => {
+  // 생년월일 계산 (나이에서 추정)
+  const currentYear = new Date().getFullYear();
+  const birthYear = patient.age ? currentYear - patient.age : currentYear - 30; // 기본값 30세
+  const birthDate = `${birthYear}-01-01`; // 간단하게 1월 1일로 설정
+
+  // 침대 번호에서 방 번호와 침대 번호 분리 (예: "301A-2" → roomId: "301A", bedNumber: "2")
+  const [roomId, bedNum] = bedNumber.split('-');
+
+  return {
+    name: patient.name,
+    phone: phone || '010-0000-0000', // 필수 필드 - 기본값 제공
+    birthDate: birthDate,
+    gender: patient.gender,
+    weightKg: patient.weight ? Math.round(patient.weight) : undefined, // 정수로 변환
+    heightCm: patient.height ? Math.round(patient.height) : undefined, // 정수로 변환
+    address: undefined, // 주소는 추후 추가 가능
+    roomId: roomId, // DB에 침대 정보 저장
+    bedNumber: bedNum // DB에 침대 번호 저장
+  };
+};
 
 export const useWardStore = create<WardStore>((set, get) => ({
   // Initial State
@@ -79,6 +149,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
   isLoading: false,
   error: null,
   isServerConnected: false,
+  patientBedMapping: new Map(),
 
   // Actions
   updatePoleData: (poleId: string, data: Partial<PoleData>) => {
@@ -228,25 +299,56 @@ export const useWardStore = create<WardStore>((set, get) => ({
     
     try {
       const response = await patientAPI.getPatients();
-      
+
       if (response.success && response.data) {
-        const patients: Patient[] = response.data.map(dbPatient => ({
-          id: `P${dbPatient.patient_id}`,
-          name: dbPatient.name,
-          room: '301A', // TODO: Get from room data
-          bed: '1', // TODO: Get from room data
-          nurseId: 'N001', // TODO: Get from session or assignment
-          nurseName: '김수연', // TODO: Get from nurse data
-          admissionDate: new Date(dbPatient.created_at || Date.now()),
-          age: new Date().getFullYear() - new Date(dbPatient.birth_date).getFullYear(),
-          gender: dbPatient.gender,
-          weight: dbPatient.weight,
-          height: dbPatient.height,
-          allergies: dbPatient.allergies ? dbPatient.allergies.split(',').map(a => a.trim()) : undefined,
-          medicalHistory: []
-        }));
+        // response.data가 배열인지 확인
+        const patientsArray = Array.isArray(response.data) ? response.data : [response.data];
+
+        // 기존 환자 정보 유지를 위해 현재 patients 배열 참조
+        const existingPatients = get().patients;
+
+        const patients: Patient[] = patientsArray.map(dbPatient => {
+          // 기존 환자 찾기 (ID로 매칭)
+          const existingPatient = existingPatients.find(p => p.id === `P${dbPatient.patientId}`);
+          return convertDBPatientToFrontend(dbPatient, existingPatient, get().patientBedMapping);
+        });
         
-        set({ patients, isLoading: false });
+        // 🔄 Critical Fix: Assign patients to beds for ward display
+        set((state) => {
+          console.log('📋 Assigning patients to beds:', patients);
+
+          // Create updated beds array with database patients assigned
+          const updatedBeds = state.beds.map(bed => {
+            // Find patient that matches this bed's room and bed number
+            // 침대 번호 형식: "301A-1" -> room: "301A", bed: "1"
+            const matchingPatient = patients.find(patient =>
+              patient.room === bed.room && patient.bed === bed.bedNumber.split('-')[1]
+            );
+
+            if (matchingPatient) {
+              console.log(`🛏️ Bed ${bed.bedNumber}: ${matchingPatient.name}`);
+              return {
+                ...bed,
+                patient: matchingPatient,
+                status: 'occupied' as const
+              };
+            } else {
+              // Clear bed if no patient matches (patient may have been discharged)
+              console.log(`🛏️ Bed ${bed.bedNumber}: Empty`);
+              return {
+                ...bed,
+                patient: undefined,
+                status: 'empty' as const
+              };
+            }
+          });
+
+          return {
+            patients,
+            beds: updatedBeds,
+            isLoading: false
+          };
+        });
       } else {
         throw new Error(response.error || 'Failed to fetch patients');
       }
@@ -259,48 +361,146 @@ export const useWardStore = create<WardStore>((set, get) => ({
   },
 
   // Patient Management Methods (with API)
-  addPatient: async (patientData: Omit<Patient, 'id'>, bedNumber: string) => {
+  addPatient: async (patientData: Omit<Patient, 'id'>, bedNumber: string, prescription?: Omit<IVPrescription, 'id'>) => {
     set({ isLoading: true, error: null });
-    
+
     try {
-      if (get().isServerConnected) {
-        // 서버에 환자 추가
-        const dbPatient: Omit<PatientDB, 'patient_id' | 'created_at'> = {
-          name: patientData.name,
-          phone: '010-0000-0000', // TODO: Add phone field to form
-          birth_date: new Date(new Date().getFullYear() - patientData.age, 0, 1).toISOString().split('T')[0],
-          gender: patientData.gender,
-          weight: patientData.weight,
-          height: patientData.height,
-          allergies: patientData.allergies?.join(', ')
-        };
-        
+      // 먼저 서버 연결 상태 확인
+      const isConnected = await checkServerConnection();
+      set({ isServerConnected: isConnected });
+
+      if (isConnected) {
+        // 서버에 환자 추가 - 변환 함수 사용 (침대 정보 포함)
+        const dbPatient = convertFrontendPatientToDB(patientData, bedNumber, patientData.phone);
+
         const response = await patientAPI.createPatient(dbPatient);
-        
+
+        console.log('🔍 Patient API Response:', response);
+        console.log('🔍 Response data structure:', {
+          responseData: response.data,
+          patientId: response.data?.patientId,
+          dataType: typeof response.data
+        });
+
         if (response.success && response.data) {
           const newPatient: Patient = {
             ...patientData,
-            id: `P${response.data.patient_id}`,
+            id: `P${response.data.patientId}`,
           };
-          
+
+          // 🗺️ Store bed mapping for this patient and update patient object immediately
+          set((state) => {
+            const newMapping = new Map(state.patientBedMapping);
+            newMapping.set(newPatient.id, bedNumber);
+            console.log(`🗺️ Storing bed mapping: ${newPatient.id} → ${bedNumber}`);
+
+            // ✨ CRITICAL: Update patient object with correct room/bed immediately
+            const bedParts = bedNumber.split('-');
+            newPatient.room = bedParts[0];
+            newPatient.bed = bedParts[1];
+            console.log(`🔄 Updated patient object: ${newPatient.name} → room: ${newPatient.room}, bed: ${newPatient.bed}`);
+
+            return { patientBedMapping: newMapping };
+          });
+
+          // 🔄 처방전이 있으면 IV 세션도 생성
+          if (prescription) {
+            try {
+              const ivSession: Omit<IVSessionDB, 'sessionId'> = {
+                patientId: response.data.patientId!,
+                dripId: 2, // Normal Saline (기본값)
+                startTime: new Date().toISOString(),
+                remainingVolume: prescription.totalVolume,
+                flowRate: prescription.calculatedFlowRate,
+                ivPoleId: `POLE-${patientData.room}-${patientData.bed}`,
+                status: 'ACTIVE',
+                totalVolumeMl: prescription.totalVolume,
+                endExpTime: new Date(Date.now() + prescription.duration * 60000).toISOString()
+              };
+
+              console.log('🔄 IV 세션 생성 시도 중:', {
+                patientId: response.data.patientId,
+                medication: prescription.medicationName,
+                volume: prescription.totalVolume,
+                duration: prescription.duration
+              });
+
+              const sessionResponse = await ivSessionAPI.createSession(ivSession);
+              if (sessionResponse.success) {
+                // 처방전 정보를 환자 객체에 추가
+                newPatient.currentPrescription = {
+                  ...prescription,
+                  id: `RX${Date.now()}`,
+                };
+                console.log('✅ IV 세션 생성 성공:', {
+                  sessionId: sessionResponse.data?.sessionId,
+                  medication: prescription.medicationName,
+                  patientName: newPatient.name
+                });
+              } else {
+                console.error('❌ IV 세션 생성 실패:', {
+                  error: sessionResponse.error,
+                  patientId: response.data.patientId,
+                  medication: prescription.medicationName,
+                  message: '환자는 등록되었지만 처방전 정보가 저장되지 않았습니다.'
+                });
+                // 사용자에게 알리기 위한 에러 상태 설정
+                set({ error: `환자 ${newPatient.name}이(가) 등록되었지만 처방전 정보 저장에 실패했습니다: ${sessionResponse.error}` });
+              }
+            } catch (error) {
+              console.error('❌ IV 세션 생성 중 예외 발생:', {
+                error: error instanceof Error ? error.message : error,
+                patientId: response.data.patientId,
+                medication: prescription.medicationName,
+                stack: error instanceof Error ? error.stack : undefined
+              });
+              // 환자는 생성되었으니 처방전 오류는 로그만 남기고 진행하되 사용자에게 알림
+              set({ error: `환자 ${newPatient.name}이(가) 등록되었지만 처방전 정보 저장 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}` });
+            }
+          }
+
           set((state) => ({
             patients: [...state.patients, newPatient],
-            beds: state.beds.map(bed => 
-              bed.bedNumber === bedNumber 
+            beds: state.beds.map(bed =>
+              bed.bedNumber === bedNumber
                 ? { ...bed, patient: newPatient, status: 'occupied' as const }
                 : bed
             ),
             isLoading: false
           }));
-          
+
+          // 🔄 CRITICAL: Save mapping immediately after patient addition
           get().saveToStorage();
+          console.log(`💾 Saved patient and bed mapping to localStorage immediately`);
+
+          // ❌ REMOVED: setTimeout fetchPatients - causes race condition
+          // Mapping is already applied to patient object, no need to re-fetch
         }
       } else {
         // 오프라인 모드 - 로컬에만 추가
         const newPatient: Patient = {
           ...patientData,
           id: `P${Date.now()}`,
+          currentPrescription: prescription ? {
+            ...prescription,
+            id: `RX${Date.now()}`,
+          } : undefined,
         };
+
+        // 🗺️ Store bed mapping for offline patient and update object immediately
+        set((state) => {
+          const newMapping = new Map(state.patientBedMapping);
+          newMapping.set(newPatient.id, bedNumber);
+          console.log(`🗺️ Storing offline bed mapping: ${newPatient.id} → ${bedNumber}`);
+
+          // ✨ CRITICAL: Update offline patient object with correct room/bed immediately
+          const bedParts = bedNumber.split('-');
+          newPatient.room = bedParts[0];
+          newPatient.bed = bedParts[1];
+          console.log(`🔄 Updated offline patient: ${newPatient.name} → room: ${newPatient.room}, bed: ${newPatient.bed}`);
+
+          return { patientBedMapping: newMapping };
+        });
 
         set((state) => ({
           patients: [...state.patients, newPatient],
@@ -330,9 +530,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
         const dbUpdates: Partial<PatientDB> = {
           name: updates.name,
           gender: updates.gender,
-          weight: updates.weight,
-          height: updates.height,
-          allergies: updates.allergies?.join(', ')
+          weightKg: updates.weight ? Math.round(updates.weight) : undefined,
+          heightCm: updates.height ? Math.round(updates.height) : undefined
         };
         
         const response = await patientAPI.updatePatient(numericId, dbUpdates);
@@ -353,8 +552,11 @@ export const useWardStore = create<WardStore>((set, get) => ({
             }),
             isLoading: false
           }));
-          
+
           get().saveToStorage();
+
+          // 실시간 동기화: 데이터베이스에서 최신 환자 목록 다시 가져오기
+          await get().fetchPatients();
         }
       } else {
         // 오프라인 모드 - 로컬에만 업데이트
@@ -429,6 +631,11 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
       // Save to localStorage
       get().saveToStorage();
+
+      // 실시간 동기화: 데이터베이스에서 최신 환자 목록 다시 가져오기
+      if (get().isServerConnected) {
+        await get().fetchPatients();
+      }
     } catch (error) {
       console.error('Failed to remove patient:', error);
       set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
@@ -517,27 +724,37 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
   // Load stored data from localStorage
   loadStoredData: () => {
+    console.log('📂 Loading stored data from localStorage...');
     const storedState = storageService.loadWardState();
-    
+
     if (storedState.patients && storedState.beds) {
+      const mappingSize = storedState.patientBedMapping?.size || 0;
+      console.log(`✅ Found stored data: ${storedState.patients.length} patients, ${storedState.beds.length} beds, ${mappingSize} bed mappings`);
+
       set({
         patients: storedState.patients,
         beds: storedState.beds,
         alerts: storedState.alerts || [],
-        poleData: storedState.poleData || new Map()
+        poleData: storedState.poleData || new Map(),
+        patientBedMapping: storedState.patientBedMapping || new Map()
       });
-      
+
+      if (storedState.patientBedMapping && storedState.patientBedMapping.size > 0) {
+        console.log('🗺️ Loaded patient bed mappings:', Array.from(storedState.patientBedMapping.entries()));
+      }
+
       get().updateWardStats();
       return true; // 저장된 데이터 로드 성공
     }
-    
+
+    console.log('❌ No stored data found');
     return false; // 저장된 데이터 없음
   },
 
   // Save current state to localStorage
   saveToStorage: () => {
-    const { patients, beds, alerts, poleData } = get();
-    storageService.saveWardState(patients, beds, alerts, poleData);
+    const { patients, beds, alerts, poleData, patientBedMapping } = get();
+    storageService.saveWardState(patients, beds, alerts, poleData, patientBedMapping);
   },
 
   // Initialize empty data for clean startup
@@ -549,21 +766,22 @@ export const useWardStore = create<WardStore>((set, get) => ({
     localStorage.removeItem('wardAlerts');
     localStorage.removeItem('wardPoleData');
 
-    // 빈 데이터로 초기화 - 목업 데이터 완전 제거
+    // 빈 데이터로 초기화 - 301A 병실 6개 침대
     const emptyBeds: BedInfo[] = [
       { bedNumber: '301A-1', room: '301A', status: 'empty' },
       { bedNumber: '301A-2', room: '301A', status: 'empty' },
-      { bedNumber: '301B-1', room: '301B', status: 'empty' },
-      { bedNumber: '301B-2', room: '301B', status: 'empty' },
-      { bedNumber: '302A-1', room: '302A', status: 'empty' },
-      { bedNumber: '302A-2', room: '302A', status: 'empty' }
+      { bedNumber: '301A-3', room: '301A', status: 'empty' },
+      { bedNumber: '301A-4', room: '301A', status: 'empty' },
+      { bedNumber: '301A-5', room: '301A', status: 'empty' },
+      { bedNumber: '301A-6', room: '301A', status: 'empty' }
     ];
 
     set({
       patients: [], // 빈 환자 배열
       beds: emptyBeds, // 빈 침대만
       alerts: [], // 빈 알림 배열
-      poleData: new Map() // 빈 폴대 데이터
+      poleData: new Map(), // 빈 폴대 데이터
+      patientBedMapping: new Map() // 빈 환자-침대 매핑
     });
 
     // Calculate initial ward stats (모두 0)
