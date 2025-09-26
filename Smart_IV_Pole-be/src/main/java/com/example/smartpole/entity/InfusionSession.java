@@ -60,7 +60,7 @@ public class InfusionSession {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "drip_id", insertable = false, updatable = false)
-    private DrugType drugType;
+    private DrugTypeEntity drugTypeEntity;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "iv_pole_id", insertable = false, updatable = false)

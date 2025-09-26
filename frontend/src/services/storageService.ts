@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   BEDS: 'smart_iv_pole_beds',
   ALERTS: 'smart_iv_pole_alerts',
   POLE_DATA: 'smart_iv_pole_pole_data',
+  PATIENT_BED_MAPPING: 'smart_iv_pole_patient_bed_mapping',
   VERSION: 'smart_iv_pole_version'
 } as const;
 
@@ -128,7 +129,7 @@ class StorageService {
     try {
       const poleDataArray = JSON.parse(stored) as [string, PoleData][];
       const poleDataMap = new Map<string, PoleData>();
-      
+
       poleDataArray.forEach(([key, value]) => {
         poleDataMap.set(key, {
           ...value,
@@ -143,13 +144,43 @@ class StorageService {
     }
   }
 
+  // 환자-침대 매핑 저장/로드
+  savePatientBedMapping(mappingMap: Map<string, string>): void {
+    const mappingArray = Array.from(mappingMap.entries());
+    console.log('💾 Saving patient bed mapping:', mappingArray);
+    localStorage.setItem(STORAGE_KEYS.PATIENT_BED_MAPPING, JSON.stringify(mappingArray));
+    console.log('✅ Patient bed mapping saved to localStorage');
+  }
+
+  loadPatientBedMapping(): Map<string, string> | null {
+    this.checkVersion();
+    const stored = localStorage.getItem(STORAGE_KEYS.PATIENT_BED_MAPPING);
+    if (!stored) return null;
+
+    try {
+      const mappingArray = JSON.parse(stored) as [string, string][];
+      const mappingMap = new Map<string, string>();
+
+      mappingArray.forEach(([patientId, bedNumber]) => {
+        mappingMap.set(patientId, bedNumber);
+      });
+
+      console.log('🗺️ Loaded patient bed mapping:', Array.from(mappingMap.entries()));
+      return mappingMap;
+    } catch (error) {
+      console.error('Failed to load patient bed mapping from storage:', error);
+      return null;
+    }
+  }
+
   // 전체 상태 저장 (wardStore에서 호출)
-  saveWardState(patients: Patient[], beds: BedInfo[], alerts: Alert[], poleData: Map<string, PoleData>): void {
+  saveWardState(patients: Patient[], beds: BedInfo[], alerts: Alert[], poleData: Map<string, PoleData>, patientBedMapping: Map<string, string>): void {
     try {
       this.savePatients(patients);
       this.saveBeds(beds);
       this.saveAlerts(alerts);
       this.savePoleData(poleData);
+      this.savePatientBedMapping(patientBedMapping);
     } catch (error) {
       console.error('Failed to save ward state:', error);
     }
@@ -161,12 +192,14 @@ class StorageService {
     beds: BedInfo[] | null;
     alerts: Alert[] | null;
     poleData: Map<string, PoleData> | null;
+    patientBedMapping: Map<string, string> | null;
   } {
     return {
       patients: this.loadPatients(),
       beds: this.loadBeds(),
       alerts: this.loadAlerts(),
-      poleData: this.loadPoleData()
+      poleData: this.loadPoleData(),
+      patientBedMapping: this.loadPatientBedMapping()
     };
   }
 

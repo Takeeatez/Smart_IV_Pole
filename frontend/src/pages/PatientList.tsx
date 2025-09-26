@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
@@ -22,7 +22,16 @@ const PatientList: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showFilters, setShowFilters] = useState(false);
 
-  const { patients, beds, removePatient } = useWardStore();
+  const { patients, beds, removePatient, fetchPatients } = useWardStore();
+
+  // 페이지 진입 시 자동으로 환자 목록 새로고침
+  useEffect(() => {
+    const loadPatients = async () => {
+      console.log('📋 환자 목록 페이지 - 데이터 새로고침');
+      await fetchPatients();
+    };
+    loadPatients();
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
 
   // Get unique rooms and nurses for filter options
   const uniqueRooms = useMemo(() => {
@@ -36,6 +45,48 @@ const PatientList: React.FC = () => {
     const nurses = [...new Set(patients.map(p => p?.nurseName).filter(Boolean))].sort();
     return nurses;
   }, [patients]);
+
+  // Helper functions - moved above useMemo to avoid hoisting issues
+  const getPatientBed = (patientId: string) => {
+    if (!beds || !Array.isArray(beds) || !patientId) return undefined;
+    return beds.find(bed => bed.patient?.id === patientId);
+  };
+
+  const getPatientPoleData = (patientId: string) => {
+    if (!patientId) return undefined;
+    const bed = getPatientBed(patientId);
+    return bed?.poleData;
+  };
+
+  const getPatientStatus = (patientId: string): 'normal' | 'warning' | 'critical' | 'offline' => {
+    if (!patientId) return 'offline';
+
+    const poleData = getPatientPoleData(patientId);
+
+    if (!poleData || poleData.status === 'offline') return 'offline';
+    if (poleData.percentage < 10) return 'critical';
+    if (poleData.percentage <= 30) return 'warning';
+    return 'normal';
+  };
+
+  const getPatientStatusValue = (patientId: string): number => {
+    const status = getPatientStatus(patientId);
+    const statusValues = { critical: 4, warning: 3, normal: 2, offline: 1 };
+    return statusValues[status];
+  };
+
+  const getPatientRemainingTime = (patientId: string): number => {
+    if (!patientId || !patients || !Array.isArray(patients)) return 0;
+
+    const patient = patients.find(p => p.id === patientId);
+    if (!patient?.currentPrescription) return 0;
+
+    return calculateRemainingTime(
+      patient.currentPrescription.prescribedAt,
+      patient.currentPrescription.duration,
+      new Date()
+    );
+  };
 
   // Advanced filtering and sorting logic
   const filteredAndSortedPatients = useMemo(() => {
@@ -101,47 +152,6 @@ const PatientList: React.FC = () => {
 
     return filtered;
   }, [patients, searchTerm, statusFilter, roomFilter, nurseFilter, sortBy, sortOrder]);
-
-  const getPatientBed = (patientId: string) => {
-    if (!beds || !Array.isArray(beds) || !patientId) return undefined;
-    return beds.find(bed => bed.patient?.id === patientId);
-  };
-
-  const getPatientPoleData = (patientId: string) => {
-    if (!patientId) return undefined;
-    const bed = getPatientBed(patientId);
-    return bed?.poleData;
-  };
-
-  const getPatientStatus = (patientId: string): 'normal' | 'warning' | 'critical' | 'offline' => {
-    if (!patientId) return 'offline';
-
-    const poleData = getPatientPoleData(patientId);
-
-    if (!poleData || poleData.status === 'offline') return 'offline';
-    if (poleData.percentage < 10) return 'critical';
-    if (poleData.percentage <= 30) return 'warning';
-    return 'normal';
-  };
-
-  const getPatientStatusValue = (patientId: string): number => {
-    const status = getPatientStatus(patientId);
-    const statusValues = { critical: 4, warning: 3, normal: 2, offline: 1 };
-    return statusValues[status];
-  };
-
-  const getPatientRemainingTime = (patientId: string): number => {
-    if (!patientId || !patients || !Array.isArray(patients)) return 0;
-
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient?.currentPrescription) return 0;
-
-    return calculateRemainingTime(
-      patient.currentPrescription.prescribedAt,
-      patient.currentPrescription.duration,
-      new Date()
-    );
-  };
 
   const getStatusBadge = (patientId: string) => {
     if (!patientId) {

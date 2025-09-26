@@ -10,15 +10,16 @@ import Sidebar from '../layout/Sidebar';
 
 const WardOverview: React.FC = () => {
   const navigate = useNavigate();
-  const { 
-    beds, 
-    wardStats, 
-    alerts, 
-    setSelectedPatient, 
-    getActiveAlerts, 
-    getCriticalAlerts 
+  const {
+    beds,
+    wardStats,
+    alerts,
+    setSelectedPatient,
+    getActiveAlerts,
+    getCriticalAlerts,
+    fetchPatients
   } = useWardStore();
-  
+
   const { isConnected, connectionStatus } = useMQTT();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showPatientModal, setShowPatientModal] = useState(false);
@@ -32,6 +33,15 @@ const WardOverview: React.FC = () => {
     }, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // 페이지 진입 시 항상 최신 환자 데이터 로드
+  useEffect(() => {
+    const loadPatients = async () => {
+      console.log('🏥 병동 현황 페이지 - 데이터 새로고침');
+      await fetchPatients();
+    };
+    loadPatients();
+  }, [fetchPatients]);
 
   const activeAlerts = getActiveAlerts();
   const criticalAlerts = getCriticalAlerts();

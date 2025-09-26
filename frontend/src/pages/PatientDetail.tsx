@@ -11,22 +11,43 @@ const PatientDetail: React.FC = () => {
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const {
     getPatientById,
     beds,
     poleData,
     getActiveAlerts,
-    getCriticalAlerts
+    getCriticalAlerts,
+    fetchPatients,
+    patients
   } = useWardStore();
 
   const { isConnected } = useMQTT();
-  
-  const patient = id ? getPatientById(id) : undefined;
+
+  const [patient, setPatient] = useState<any>(undefined);
   const patientBed = beds.find(bed => bed.patient?.id === id);
   const patientPoleData = patientBed?.poleData;
   const activeAlerts = getActiveAlerts().filter(alert => alert.patientId === id);
   const criticalAlerts = getCriticalAlerts().filter(alert => alert.patientId === id);
+
+  // 페이지 진입 시 환자 데이터 새로고침
+  useEffect(() => {
+    const loadPatientData = async () => {
+      console.log('👤 환자 상세 페이지 - 데이터 새로고침 (ID:', id, ')');
+      setIsLoading(true);
+      await fetchPatients();
+      setIsLoading(false);
+    };
+    loadPatientData();
+  }, [id]);
+
+  // 환자 데이터가 업데이트되면 patient 상태 업데이트
+  useEffect(() => {
+    const foundPatient = id ? getPatientById(id) : undefined;
+    console.log('🔍 환자 검색:', { id, foundPatient, patients });
+    setPatient(foundPatient);
+  }, [id, patients, getPatientById]);
 
   // Update current time every minute
   useEffect(() => {
@@ -35,6 +56,18 @@ const PatientDetail: React.FC = () => {
     }, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // 로딩 중일 때 로딩 화면 표시
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">환자 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!patient) {
     return (

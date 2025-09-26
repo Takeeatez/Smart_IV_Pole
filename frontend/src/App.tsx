@@ -9,7 +9,7 @@ import { useWardStore } from './stores/wardStore'
 import { useMQTT } from './hooks/useMQTT'
 
 function App() {
-  const { checkConnection, loadStoredData, isServerConnected } = useWardStore()
+  const { checkConnection, loadStoredData, initializeMockData } = useWardStore()
   const [isInitialized, setIsInitialized] = useState(false)
   
   useMQTT() // Initialize MQTT connection (currently mock)
@@ -17,28 +17,62 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        console.log('🚀 앱 초기화 시작...')
+
         // 1. 먼저 저장된 데이터가 있는지 확인하고 로드
         const hasStoredData = loadStoredData()
-        
+        console.log('📂 저장된 데이터 로드:', hasStoredData)
+
+        // 침대 구성이 잘못되어 있으면 초기화 (환자-침대 매핑은 보존)
+        const { beds, patientBedMapping } = useWardStore.getState()
+        const hasMixedRooms = beds.some(bed => !bed.bedNumber.startsWith('301A'))
+        if (hasMixedRooms || beds.length !== 6) {
+          console.log('🔄 침대 구성 초기화 중... (매핑 데이터 보존)')
+
+          // 🔄 CRITICAL FIX: 매핑 데이터 백업
+          const savedMapping = new Map(patientBedMapping)
+          console.log('💾 환자-침대 매핑 백업:', Array.from(savedMapping.entries()))
+
+          // ❌ FIXED: localStorage.clear() 대신 선택적 삭제
+          localStorage.removeItem('smart_iv_pole_patients')
+          localStorage.removeItem('smart_iv_pole_beds')
+          localStorage.removeItem('smart_iv_pole_alerts')
+          localStorage.removeItem('smart_iv_pole_pole_data')
+          // 매핑 데이터는 삭제하지 않음: smart_iv_pole_patient_bed_mapping 보존
+
+          initializeMockData()
+
+          // 🔄 매핑 데이터 복원 및 즉시 저장
+          useWardStore.setState({ patientBedMapping: savedMapping })
+          console.log('🔄 환자-침대 매핑 복원 완료')
+
+          // 🔄 복원된 매핑을 localStorage에 즉시 저장
+          if (savedMapping.size > 0) {
+            useWardStore.getState().saveToStorage()
+            console.log('💾 복원된 매핑 localStorage에 저장 완료')
+          }
+        }
+
         // 2. 백엔드 서버 연결 확인 및 데이터 동기화
+        console.log('🔗 백엔드 서버 연결 시도 중...')
         await checkConnection()
-        
+
         // 3. 초기화 완료
         setIsInitialized(true)
-        
-        console.log('App initialized:', { 
-          hasStoredData, 
-          isServerConnected: isServerConnected 
+
+        console.log('✅ 앱 초기화 완료!', {
+          hasStoredData,
+          serverConnected: '연결 상태는 wardStore에서 확인'
         })
       } catch (error) {
-        console.error('App initialization failed:', error)
+        console.error('❌ 앱 초기화 실패:', error)
         // 에러가 발생해도 저장된 데이터나 목업 데이터로 앱 실행
         setIsInitialized(true)
       }
     }
 
     initializeApp()
-  }, [checkConnection, loadStoredData, isServerConnected])
+  }, [checkConnection, loadStoredData]) // isServerConnected 제거로 무한 루프 방지
 
   // 초기화 중일 때는 로딩 화면 표시 (선택사항)
   if (!isInitialized) {

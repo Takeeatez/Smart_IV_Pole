@@ -50,5 +50,5 @@ public class InfusionLog {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "drip_id", insertable = false, updatable = false)
-    private DrugType drugType;
+    private DrugTypeEntity drugTypeEntity;
 }

@@ -12,7 +12,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class DrugType {
+public class DrugTypeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
