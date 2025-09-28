@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calculator, User, Pill, Clock } from 'lucide-react';
-import { Patient, IVPrescription } from '../../types';
-import { calculateGTT, calculateFlowRate, COMMON_MEDICATIONS, COMMON_DURATIONS } from '../../utils/gttCalculator';
+import { X, User } from 'lucide-react';
+import { Patient } from '../../types';
 import { useWardStore } from '../../stores/wardStore';
 
 interface PatientModalProps {
@@ -17,7 +16,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
   bedNumber,
   patient
 }) => {
-  const { addPatient, updatePatient, addIVPrescription, fetchPatients, beds } = useWardStore();
+  const { addPatient, updatePatient, fetchPatients, beds } = useWardStore();
 
   // Patient form state
   const [patientForm, setPatientForm] = useState({
@@ -35,21 +34,6 @@ const PatientModal: React.FC<PatientModalProps> = ({
   // Selected bed state for when bedNumber is not provided
   const [selectedBed, setSelectedBed] = useState<string>(bedNumber || '');
 
-  // IV Prescription form state
-  const [prescriptionForm, setPrescriptionForm] = useState({
-    medicationName: '',
-    totalVolume: '',
-    duration: '',
-    gttFactor: 20 as 20 | 60,
-    prescribedBy: '',
-    notes: ''
-  });
-
-  // Calculated values
-  const [calculatedValues, setCalculatedValues] = useState({
-    gtt: 0,
-    flowRate: 0
-  });
 
   // Initialize form data when editing
   useEffect(() => {
@@ -66,16 +50,6 @@ const PatientModal: React.FC<PatientModalProps> = ({
         nurseName: patient.nurseName
       });
 
-      if (patient.currentPrescription) {
-        setPrescriptionForm({
-          medicationName: patient.currentPrescription.medicationName,
-          totalVolume: patient.currentPrescription.totalVolume.toString(),
-          duration: patient.currentPrescription.duration.toString(),
-          gttFactor: patient.currentPrescription.gttFactor,
-          prescribedBy: patient.currentPrescription.prescribedBy,
-          notes: patient.currentPrescription.notes || ''
-        });
-      }
     }
   }, [patient]);
 
@@ -84,23 +58,6 @@ const PatientModal: React.FC<PatientModalProps> = ({
     setSelectedBed(bedNumber || '');
   }, [bedNumber]);
 
-  // Calculate GTT and flow rate when form values change
-  useEffect(() => {
-    const volume = parseFloat(prescriptionForm.totalVolume) || 0;
-    const duration = parseFloat(prescriptionForm.duration) || 0;
-    
-    if (volume > 0 && duration > 0) {
-      const gtt = calculateGTT(volume, duration, prescriptionForm.gttFactor);
-      const flowRate = calculateFlowRate(volume, duration);
-      
-      setCalculatedValues({
-        gtt: Math.round(gtt * 10) / 10,
-        flowRate: Math.round(flowRate * 10) / 10
-      });
-    } else {
-      setCalculatedValues({ gtt: 0, flowRate: 0 });
-    }
-  }, [prescriptionForm.totalVolume, prescriptionForm.duration, prescriptionForm.gttFactor]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,36 +94,9 @@ const PatientModal: React.FC<PatientModalProps> = ({
     if (patient) {
       // Update existing patient
       await updatePatient(patient.id, patientData);
-
-      // Update IV prescription if provided
-      if (prescriptionForm.medicationName && prescriptionForm.totalVolume && prescriptionForm.duration) {
-        addIVPrescription(patient.id, {
-          medicationName: prescriptionForm.medicationName,
-          totalVolume: parseFloat(prescriptionForm.totalVolume),
-          duration: parseFloat(prescriptionForm.duration),
-          gttFactor: prescriptionForm.gttFactor,
-          prescribedBy: prescriptionForm.prescribedBy,
-          notes: prescriptionForm.notes,
-          calculatedGTT: calculatedValues.gtt,
-          calculatedFlowRate: calculatedValues.flowRate,
-          prescribedAt: new Date()
-        });
-      }
     } else {
-      // Add new patient with prescription (통합 처리)
-      const prescription = (prescriptionForm.medicationName && prescriptionForm.totalVolume && prescriptionForm.duration) ? {
-        medicationName: prescriptionForm.medicationName,
-        totalVolume: parseFloat(prescriptionForm.totalVolume),
-        duration: parseFloat(prescriptionForm.duration),
-        gttFactor: prescriptionForm.gttFactor,
-        prescribedBy: prescriptionForm.prescribedBy,
-        notes: prescriptionForm.notes,
-        calculatedGTT: calculatedValues.gtt,
-        calculatedFlowRate: calculatedValues.flowRate,
-        prescribedAt: new Date()
-      } : undefined;
-
-      await addPatient(patientData, finalBedNumber, prescription);
+      // Add new patient (patient registration only)
+      await addPatient(patientData, finalBedNumber);
     }
 
     // 성공적으로 추가 후 1초 뒤 데이터 새로고침
@@ -188,14 +118,6 @@ const PatientModal: React.FC<PatientModalProps> = ({
       allergies: '',
       nurseId: 'N001',
       nurseName: '김수연'
-    });
-    setPrescriptionForm({
-      medicationName: '',
-      totalVolume: '',
-      duration: '',
-      gttFactor: 20,
-      prescribedBy: '',
-      notes: ''
     });
   };
 
@@ -259,9 +181,8 @@ const PatientModal: React.FC<PatientModalProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Patient Information */}
-            <div className="space-y-6">
+          {/* Patient Information */}
+          <div className="space-y-6">
               <div className="flex items-center gap-2 mb-4">
                 <User className="w-5 h-5 text-blue-600" />
                 <h3 className="text-lg font-semibold text-gray-900">환자 기본 정보</h3>
@@ -385,156 +306,6 @@ const PatientModal: React.FC<PatientModalProps> = ({
                 />
               </div>
             </div>
-
-            {/* IV Prescription */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Pill className="w-5 h-5 text-green-600" />
-                <h3 className="text-lg font-semibold text-gray-900">IV 처방 정보</h3>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  약품명
-                </label>
-                <select
-                  value={prescriptionForm.medicationName}
-                  onChange={(e) => setPrescriptionForm(prev => ({ ...prev, medicationName: e.target.value }))}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">약품 선택</option>
-                  {COMMON_MEDICATIONS.map((med) => (
-                    <option key={med.id} value={med.name}>
-                      {med.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    총 용량 (mL)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={prescriptionForm.totalVolume}
-                    onChange={(e) => setPrescriptionForm(prev => ({ ...prev, totalVolume: e.target.value }))}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    투여 시간 (분)
-                  </label>
-                  <select
-                    value={prescriptionForm.duration}
-                    onChange={(e) => setPrescriptionForm(prev => ({ ...prev, duration: e.target.value }))}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">시간 선택</option>
-                    {COMMON_DURATIONS.map((duration) => (
-                      <option key={duration.value} value={duration.value}>
-                        {duration.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    GTT Factor
-                  </label>
-                  <select
-                    value={prescriptionForm.gttFactor}
-                    onChange={(e) => setPrescriptionForm(prev => ({ ...prev, gttFactor: parseInt(e.target.value) as 20 | 60 }))}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value={20}>20 GTT/mL (Macro drip)</option>
-                    <option value={60}>60 GTT/mL (Micro drip)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    처방의사
-                  </label>
-                  <input
-                    type="text"
-                    value={prescriptionForm.prescribedBy}
-                    onChange={(e) => setPrescriptionForm(prev => ({ ...prev, prescribedBy: e.target.value }))}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="김의사"
-                  />
-                </div>
-              </div>
-
-              {/* GTT Calculation Results */}
-              {prescriptionForm.totalVolume && prescriptionForm.duration && (
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Calculator className="w-5 h-5 text-blue-600" />
-                    <h4 className="font-semibold text-blue-900">자동 계산 결과</h4>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {calculatedValues.gtt}
-                      </div>
-                      <div className="text-sm text-blue-700">GTT/min (분당 방울 수)</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {calculatedValues.flowRate}
-                      </div>
-                      <div className="text-sm text-blue-700">mL/hr (시간당 투여량)</div>
-                    </div>
-                  </div>
-                  <div className="border-t border-blue-200 pt-3">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-blue-600" />
-                      <div className="text-sm">
-                        <span className="font-medium text-blue-900">예상 투여 종료 시간: </span>
-                        <span className="text-blue-700">
-                          {(() => {
-                            const endTime = new Date();
-                            endTime.setMinutes(endTime.getMinutes() + parseInt(prescriptionForm.duration));
-                            return endTime.toLocaleString('ko-KR', {
-                              month: 'long',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            });
-                          })()}
-                        </span>
-                        <span className="text-blue-600 ml-2">
-                          ({Math.floor(parseInt(prescriptionForm.duration) / 60)}시간 {parseInt(prescriptionForm.duration) % 60}분 후)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  특이사항
-                </label>
-                <textarea
-                  value={prescriptionForm.notes}
-                  onChange={(e) => setPrescriptionForm(prev => ({ ...prev, notes: e.target.value }))}
-                  rows={3}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="투여 시 주의사항이나 특이사항을 입력하세요"
-                />
-              </div>
-            </div>
-          </div>
 
           {/* Footer */}
           <div className="flex justify-end gap-4 mt-8 pt-6 border-t border-gray-200">

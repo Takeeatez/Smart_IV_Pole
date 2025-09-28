@@ -111,3 +111,9 @@ export interface WardStats {
   critical: number;
   offline: number;
 }
+
+// Drug Administration Types
+export interface DripDB {
+  dripId?: number;
+  dripName: string;
+}

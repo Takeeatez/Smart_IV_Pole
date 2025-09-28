@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Wifi, WifiOff, Activity, Users, AlertTriangle, Bed, UserCheck, UserPlus, CheckCircle, FileText, ArrowRight } from 'lucide-react';
+import { Bell, Wifi, WifiOff, Activity, Users, AlertTriangle, Bed, UserCheck, UserPlus, CheckCircle, FileText, ArrowRight, Pill } from 'lucide-react';
 import { useWardStore } from '../../stores/wardStore';
+import { Patient } from '../../types';
 import { useMQTT } from '../../hooks/useMQTT';
 import BedCard from './BedCard';
 import PatientModal from '../patient/PatientModal';
+import DrugPrescriptionModal from '../patient/DrugPrescriptionModal';
 import AlertCenter from '../alert/AlertCenter';
 import Sidebar from '../layout/Sidebar';
 import Button from '../ui/Button';
@@ -27,6 +29,8 @@ const WardOverview: React.FC = () => {
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [selectedBedNumber, setSelectedBedNumber] = useState('');
   const [showAlertCenter, setShowAlertCenter] = useState(false);
+  const [showDrugPrescriptionModal, setShowDrugPrescriptionModal] = useState(false);
+  const [selectedPatientForPrescription, setSelectedPatientForPrescription] = useState<Patient | null>(null);
 
   // Update current time every minute
   useEffect(() => {
@@ -60,6 +64,20 @@ const WardOverview: React.FC = () => {
     }
   };
 
+  const handleDrugPrescription = () => {
+    // Find first patient that needs prescription (for quick action)
+    const patientWithoutPrescription = beds.find(bed =>
+      bed.patient && !bed.patient.currentPrescription
+    )?.patient;
+
+    if (patientWithoutPrescription) {
+      setSelectedPatientForPrescription(patientWithoutPrescription);
+      setShowDrugPrescriptionModal(true);
+    } else {
+      alert('처방이 필요한 환자가 없습니다.');
+    }
+  };
+
   const getStatusText = (count: number, total: number) => {
     if (total === 0) return '0개';
     return `${count}개`;
@@ -70,9 +88,9 @@ const WardOverview: React.FC = () => {
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-3 flex-shrink-0">
           <div className="flex justify-between items-center mb-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">병동 현황</h1>
@@ -122,9 +140,9 @@ const WardOverview: React.FC = () => {
         </div>
 
           {/* Key Metrics Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-4 flex-shrink-0">
             <Card>
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">전체 환자</p>
@@ -141,7 +159,7 @@ const WardOverview: React.FC = () => {
             </Card>
 
             <Card>
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">정상 상태</p>
@@ -159,7 +177,7 @@ const WardOverview: React.FC = () => {
             </Card>
 
             <Card>
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">주의 필요</p>
@@ -177,7 +195,7 @@ const WardOverview: React.FC = () => {
             </Card>
 
             <Card>
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">응급 상태</p>
@@ -195,7 +213,7 @@ const WardOverview: React.FC = () => {
             </Card>
 
             <Card>
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">병상 이용률</p>
@@ -216,14 +234,14 @@ const WardOverview: React.FC = () => {
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left Column - Bed Grid */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
+          <div className="lg:col-span-2 min-h-0">
+            <Card className="h-full flex flex-col">
+              <CardHeader className="flex-shrink-0 pb-3">
                 <CardTitle>병실 현황 - 301A호</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1 min-h-0">
                 <div className="grid grid-cols-3 gap-4">
                   {beds.map((bed) => (
                     <BedCard
@@ -238,13 +256,13 @@ const WardOverview: React.FC = () => {
           </div>
 
           {/* Right Column - Alerts and Quick Actions */}
-          <div className="lg:col-span-1">
-            <Card className="mb-6">
-              <CardHeader>
+          <div className="lg:col-span-1 min-h-0 flex flex-col">
+            <Card className="mb-3 flex-1 min-h-0 flex flex-col">
+              <CardHeader className="flex-shrink-0 pb-3">
                 <CardTitle>실시간 알림</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4 max-h-96 overflow-y-auto">
+              <CardContent className="flex-1 min-h-0">
+                <div className="space-y-3 h-full overflow-y-auto">
                   {activeAlerts.length === 0 ? (
                     <div className="text-center py-8 text-gray-600">
                       <Bell className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -297,27 +315,27 @@ const WardOverview: React.FC = () => {
             </Card>
 
             {/* Quick Actions */}
-            <Card className="overflow-hidden">
-              <CardHeader>
+            <Card className="flex-shrink-0 overflow-hidden">
+              <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
                   <Activity className="w-5 h-5" />
                   빠른 작업
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4">
-                <div className="space-y-3">
+              <CardContent className="p-3">
+                <div className="space-y-2">
                   {/* 신규 환자 등록 */}
                   <div
                     onClick={() => navigate('/patients')}
-                    className="group relative overflow-hidden bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl p-4 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg"
+                    className="group relative overflow-hidden bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl p-3 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                          <UserPlus className="w-5 h-5" />
+                        <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                          <UserPlus className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="font-semibold text-sm">신규 환자 등록</div>
+                          <div className="font-semibold text-xs">신규 환자 등록</div>
                           <div className="text-xs text-blue-100">새로운 IV 투여 시작</div>
                         </div>
                       </div>
@@ -327,14 +345,14 @@ const WardOverview: React.FC = () => {
                   </div>
 
                   {/* 모든 알림 확인 */}
-                  <div className="group relative overflow-hidden bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl p-4 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg">
+                  <div className="group relative overflow-hidden bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl p-3 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                          <CheckCircle className="w-5 h-5" />
+                        <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                          <CheckCircle className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="font-semibold text-sm">모든 알림 확인</div>
+                          <div className="font-semibold text-xs">모든 알림 확인</div>
                           <div className="text-xs text-green-100">일괄 처리</div>
                         </div>
                       </div>
@@ -344,15 +362,34 @@ const WardOverview: React.FC = () => {
                   </div>
 
                   {/* 일일 보고서 */}
-                  <div className="group relative overflow-hidden bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white rounded-xl p-4 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg">
+                  <div className="group relative overflow-hidden bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white rounded-xl p-3 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                          <FileText className="w-5 h-5" />
+                        <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                          <FileText className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="font-semibold text-sm">일일 보고서</div>
+                          <div className="font-semibold text-xs">일일 보고서</div>
                           <div className="text-xs text-purple-100">오늘의 활동 요약</div>
+                        </div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-white/70 group-hover:text-white group-hover:translate-x-1 transition-all" />
+                    </div>
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-white/5 rounded-full -translate-y-8 translate-x-8"></div>
+                  </div>
+                  {/* 약품 처방 */}
+                  <div
+                    onClick={handleDrugPrescription}
+                    className="group relative overflow-hidden bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white rounded-xl p-3 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:shadow-lg"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                          <Pill className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-xs">약품 처방</div>
+                          <div className="text-xs text-orange-100">신속 처방 시작</div>
                         </div>
                       </div>
                       <ArrowRight className="w-4 h-4 text-white/70 group-hover:text-white group-hover:translate-x-1 transition-all" />
@@ -375,6 +412,18 @@ const WardOverview: React.FC = () => {
         }}
         bedNumber={selectedBedNumber}
       />
+
+      {/* Drug Prescription Modal */}
+      {selectedPatientForPrescription && (
+        <DrugPrescriptionModal
+          isOpen={showDrugPrescriptionModal}
+          onClose={() => {
+            setShowDrugPrescriptionModal(false);
+            setSelectedPatientForPrescription(null);
+          }}
+          patient={selectedPatientForPrescription}
+        />
+      )}
 
       {/* Alert Center */}
       <AlertCenter

@@ -154,19 +154,44 @@ export const patientAPI = {
   },
 };
 
-// 수액 관련 API
+// 수액 관련 API (Drug Types)
 export const dripAPI = {
   // 모든 수액 조회
   async getDrips(): Promise<ApiResponse<DripDB[]>> {
     return apiRequest<DripDB[]>('/drips');
   },
 
+  // 특정 수액 조회
+  async getDrip(dripId: number): Promise<ApiResponse<DripDB>> {
+    return apiRequest<DripDB>(`/drips/${dripId}`);
+  },
+
   // 수액 추가
-  async createDrip(drip: Omit<DripDB, 'drip_id'>): Promise<ApiResponse<DripDB>> {
+  async createDrip(drip: Omit<DripDB, 'dripId'>): Promise<ApiResponse<DripDB>> {
     return apiRequest<DripDB>('/drips', {
       method: 'POST',
       body: JSON.stringify(drip),
     });
+  },
+
+  // 수액 정보 수정
+  async updateDrip(dripId: number, drip: Partial<DripDB>): Promise<ApiResponse<DripDB>> {
+    return apiRequest<DripDB>(`/drips/${dripId}`, {
+      method: 'PUT',
+      body: JSON.stringify(drip),
+    });
+  },
+
+  // 수액 삭제
+  async deleteDrip(dripId: number): Promise<ApiResponse<void>> {
+    return apiRequest<void>(`/drips/${dripId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // 수액 존재 여부 확인
+  async dripExists(dripId: number): Promise<ApiResponse<boolean>> {
+    return apiRequest<boolean>(`/drips/${dripId}/exists`);
   },
 };
 
