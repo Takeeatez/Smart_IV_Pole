@@ -1,6 +1,7 @@
 import React from 'react';
 import { BedInfo, StatusColor } from '../../types';
-import { Battery, Droplet, Clock, AlertTriangle, Phone, Plus } from 'lucide-react';
+import { Battery, Droplet, Clock, AlertTriangle, Phone, Plus, User, Activity } from 'lucide-react';
+import { cn } from '../../utils/cn';
 
 interface BedCardProps {
   bed: BedInfo;
@@ -19,26 +20,26 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
   const getStatusColorClass = (status: StatusColor) => {
     switch (status) {
       case 'normal':
-        return 'border-green-200 bg-green-50 hover:bg-green-100';
+        return 'border-green-200 bg-green-50 hover:shadow-lg';
       case 'warning':
-        return 'border-orange-200 bg-orange-50 hover:bg-orange-100';
+        return 'border-yellow-200 bg-yellow-50 hover:shadow-lg';
       case 'critical':
-        return 'border-red-200 bg-red-50 hover:bg-red-100 animate-pulse';
+        return 'border-red-200 bg-red-50 hover:shadow-lg animate-pulse';
       case 'offline':
-        return 'border-gray-200 bg-gray-50 hover:bg-gray-100';
+        return 'border-gray-200 bg-gray-50 hover:shadow-md';
       default:
-        return 'border-gray-200 bg-white hover:bg-gray-50';
+        return 'border-gray-200 bg-white hover:shadow-md';
     }
   };
 
   const getGaugeColor = (status: StatusColor) => {
     switch (status) {
       case 'normal':
-        return 'bg-green-500';
+        return 'bg-success';
       case 'warning':
-        return 'bg-orange-500';
+        return 'bg-warning';
       case 'critical':
-        return 'bg-red-500';
+        return 'bg-error';
       case 'offline':
         return 'bg-gray-400';
       default:
@@ -61,18 +62,18 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
 
   if (!isOccupied) {
     return (
-      <div 
+      <div
         onClick={onClick}
-        className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer h-64 flex flex-col items-center justify-center group"
+        className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer h-64 flex flex-col items-center justify-center group"
       >
-        <div className="text-gray-400 text-lg font-medium mb-2">{bed.bedNumber}</div>
+        <div className="text-gray-600 text-lg font-medium mb-2">{bed.bedNumber}</div>
         <div className="text-gray-500 text-sm mb-4">비어있음</div>
-        <div className="mt-2 w-14 h-14 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors">
-          <Plus className="w-7 h-7 text-gray-400 group-hover:text-blue-600 transition-colors" />
+        <div className="mt-2 w-14 h-14 bg-gray-100 group-hover:bg-blue-100 rounded-xl flex items-center justify-center transition-colors">
+          <Plus className="w-7 h-7 text-gray-600 group-hover:text-blue-600 transition-colors" />
         </div>
         <div className="mt-4 text-center">
           <div className="text-blue-600 text-sm font-medium group-hover:text-blue-700">환자 등록</div>
-          <div className="text-gray-400 text-xs mt-1">클릭하여 새 환자 추가</div>
+          <div className="text-gray-600 text-xs mt-1">클릭하여 새 환자 추가</div>
         </div>
       </div>
     );
@@ -81,11 +82,11 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
   return (
     <div
       onClick={onClick}
-      className={`
-        border-2 rounded-xl p-6 cursor-pointer transition-all duration-200 h-64 flex flex-col
-        ${getStatusColorClass(status)}
-        ${status === 'critical' ? 'shadow-lg' : 'shadow-sm hover:shadow-md'}
-      `}
+      className={cn(
+        'border-2 rounded-xl p-6 cursor-pointer transition-all duration-200 h-64 flex flex-col',
+        getStatusColorClass(status),
+        status === 'critical' && 'shadow-floating'
+      )}
     >
       {/* Header */}
       <div className="flex justify-between items-start mb-4">
