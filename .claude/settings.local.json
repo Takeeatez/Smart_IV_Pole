@@ -22,7 +22,9 @@
       "Bash(find:*)",
       "Bash(lsof:*)",
       "Bash(xargs kill:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Read(//Users/ayaan/Git/**)",
+      "Bash(npx tailwindcss:*)"
     ],
     "deny": [],
     "ask": []

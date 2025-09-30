@@ -37,6 +37,17 @@ public class Pole {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(name = "patient_id")
+    private Integer patientId; // 폴대에 할당된 환자 ID
+
+    @Column(name = "assigned_at")
+    private LocalDateTime assignedAt; // 폴대 할당 시간
+
+    // Bidirectional relationship with Patient
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "patient_id", insertable = false, updatable = false)
+    private Patient patient;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
@@ -44,5 +55,22 @@ public class Pole {
 
     public enum PoleStatus {
         active, maintenance, inactive
+    }
+
+    // Utility methods for pole assignment
+    public boolean isAssigned() {
+        return patientId != null;
+    }
+
+    public void assignToPatient(Integer patientId) {
+        this.patientId = patientId;
+        this.assignedAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void unassign() {
+        this.patientId = null;
+        this.assignedAt = null;
+        this.updatedAt = LocalDateTime.now();
     }
 }

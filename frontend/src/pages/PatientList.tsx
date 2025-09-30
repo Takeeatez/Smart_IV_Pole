@@ -77,8 +77,10 @@ const PatientList: React.FC = () => {
     const patient = patients.find(p => p.id === patientId);
     if (!patient?.currentPrescription) return 0;
 
+    // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
+    const startTime = patient.currentPrescription.startedAt || patient.currentPrescription.prescribedAt;
     return calculateRemainingTime(
-      patient.currentPrescription.prescribedAt,
+      startTime,
       patient.currentPrescription.duration,
       new Date()
     );
@@ -396,8 +398,10 @@ const PatientList: React.FC = () => {
 
                     const poleData = getPatientPoleData(patient.id);
                     const prescription = patient.currentPrescription;
-                    const progress = prescription ? calculateProgress(prescription.prescribedAt, prescription.duration) : 0;
-                    const remainingTime = prescription ? calculateRemainingTime(prescription.prescribedAt, prescription.duration) : 0;
+                    // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
+                    const startTime = prescription?.startedAt || prescription?.prescribedAt;
+                    const progress = (prescription && startTime) ? calculateProgress(startTime, prescription.duration) : 0;
+                    const remainingTime = (prescription && startTime) ? calculateRemainingTime(startTime, prescription.duration) : 0;
 
                     return (
                       <tr key={patient.id} className="hover:bg-gray-50 transition-colors">

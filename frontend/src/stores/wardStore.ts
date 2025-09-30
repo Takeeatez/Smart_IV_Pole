@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Patient, PoleData, Alert, BedInfo, WardStats, StatusColor, IVPrescription } from '../types';
 import { createIVPrescription } from '../utils/gttCalculator';
-import { patientAPI, prescriptionAPI, ivSessionAPI, checkServerConnection, PatientDB, PrescriptionDB, IVSessionDB, dripAPI } from '../services/api';
+import { patientAPI, prescriptionAPI, ivSessionAPI, checkServerConnection, PatientDB, PrescriptionDB, IVSessionDB, dripAPI, initializeDefaultDrugs } from '../services/api';
 import storageService from '../services/storageService';
 
 interface WardStore {
@@ -83,6 +83,7 @@ const convertDBPrescriptionToFrontend = (dbPrescription: PrescriptionDB, drugNam
     calculatedFlowRate: dbPrescription.infusionRateMlHr,
     prescribedBy: dbPrescription.prescribedBy,
     prescribedAt: new Date(dbPrescription.prescribedAt || Date.now()),
+    startedAt: dbPrescription.startedAt ? new Date(dbPrescription.startedAt) : undefined, // 투여 시작 시간
     notes: dbPrescription.specialInstructions || undefined,
   };
 };
@@ -334,8 +335,11 @@ export const useWardStore = create<WardStore>((set, get) => ({
   checkConnection: async () => {
     const isConnected = await checkServerConnection();
     set({ isServerConnected: isConnected });
-    
+
     if (isConnected) {
+      // 💊 서버 연결 성공 시 기본 약품 목록 초기화 (DB가 비어있을 경우)
+      await initializeDefaultDrugs();
+
       // 서버 연결 성공 시 백엔드 데이터 로드
       await get().fetchPatients();
     } else {
@@ -443,13 +447,22 @@ export const useWardStore = create<WardStore>((set, get) => ({
           }
 
           // 💊 localStorage 처방 데이터 오버레이 (데이터베이스 처방보다 우선)
+          // 🔥 CRITICAL: localStorage가 항상 우선 (DB가 비어있어도 localStorage 유지)
           const patientId = `P${dbPatient.patientId}`;
           if (storedPrescriptions?.has(patientId)) {
             const storedPrescription = storedPrescriptions.get(patientId);
             if (storedPrescription) {
-              console.log(`💊 [OVERLAY] ${dbPatient.name}에게 localStorage 처방 적용: ${storedPrescription.medicationName}`);
-              currentPrescription = storedPrescription;
+              console.log(`💊 [OVERLAY] ${dbPatient.name}에게 localStorage 처방 적용 (DB 덮어쓰기): ${storedPrescription.medicationName}`);
+              currentPrescription = storedPrescription; // localStorage가 무조건 우선
+
+              // 처방 이력도 localStorage 우선 (DB보다 최신일 수 있음)
+              if (prescriptionHistory.length === 0) {
+                console.log(`💊 [OVERLAY] ${dbPatient.name} DB 이력 없음, localStorage 처방만 사용`);
+              }
             }
+          } else if (!currentPrescription) {
+            // localStorage도 없고 DB도 없으면 로그만 남김
+            console.log(`ℹ️ [NO-PRESCRIPTION] ${dbPatient.name} 처방 정보 없음 (DB, localStorage 모두 비어있음)`);
           }
 
           const finalPatient = convertDBPatientToFrontend(
@@ -792,10 +805,10 @@ export const useWardStore = create<WardStore>((set, get) => ({
       // Save to localStorage
       get().saveToStorage();
 
-      // 실시간 동기화: 데이터베이스에서 최신 환자 목록 다시 가져오기
-      if (get().isServerConnected) {
-        await get().fetchPatients();
-      }
+      // 🔥 REMOVED: fetchPatients() call after patient removal
+      // Reason: Can overwrite localStorage prescription data with empty DB data
+      // The local state update above is sufficient for UI consistency
+      // Manual refresh by user will sync with DB if needed
     } catch (error) {
       console.error('Failed to remove patient:', error);
       set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
@@ -812,12 +825,13 @@ export const useWardStore = create<WardStore>((set, get) => ({
     try {
       // 약품명에서 drugTypeId 찾기 (localStorage 캐시 사용)
       let drugTypeId = 1; // 기본값
+      let matchedDrugName = prescriptionData.medicationName; // 매칭된 약품 이름 저장
       try {
         // Try localStorage first
         let drugs: any[] = [];
         const cachedDrugs = storageService.loadDrugTypes();
         if (cachedDrugs && cachedDrugs.length > 0) {
-          console.log('💊 [PRESCRIPTION-CACHE] localStorage에서 약품 타입 로드');
+          console.log('💊 [PRESCRIPTION-CACHE] localStorage에서 약품 타입 로드:', cachedDrugs.length, '개');
           drugs = cachedDrugs;
         } else {
           // Fallback to API
@@ -828,22 +842,32 @@ export const useWardStore = create<WardStore>((set, get) => ({
           // Save to localStorage
           if (drugs.length > 0) {
             storageService.saveDrugTypes(drugs);
+            console.log('💊 [CACHE-SAVE] 약품 타입 localStorage 저장:', drugs.length, '개');
           }
         }
 
-        const matchingDrug = drugs.find(drug =>
-          drug.dripName === prescriptionData.medicationName
-        );
+        // 약품 이름 매칭 로직 강화 (정확한 일치 + 대소문자 무시)
+        const matchingDrug = drugs.find(drug => {
+          const dbName = drug.dripName.trim().toLowerCase();
+          const inputName = prescriptionData.medicationName.trim().toLowerCase();
+          return dbName === inputName;
+        });
+
         if (matchingDrug?.dripId) {
           drugTypeId = matchingDrug.dripId;
+          matchedDrugName = matchingDrug.dripName; // DB의 정확한 이름 사용
+          console.log(`✅ [DRUG-MATCH] 약품 매칭 성공: "${prescriptionData.medicationName}" → drugTypeId=${drugTypeId} (${matchedDrugName})`);
+        } else {
+          console.warn(`⚠️ [DRUG-MISMATCH] 약품 매칭 실패: "${prescriptionData.medicationName}" → 기본값 drugTypeId=1 사용`);
+          console.warn('💊 [DRUG-LIST] 사용 가능한 약품:', drugs.map(d => d.dripName).join(', '));
         }
       } catch (error) {
-        console.warn('Failed to find drug type, using default ID:', error);
+        console.error('❌ [DRUG-ERROR] 약품 타입 조회 실패, 기본값 사용:', error);
       }
 
-      // 백엔드 Prescription API 호출
+      // 백엔드 Prescription API 호출 (startedAt 포함)
       const numericPatientId = parseInt(patientId.replace('P', ''));
-      const prescriptionRequest: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'startedAt' | 'completedAt'> = {
+      const prescriptionRequest: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt'> = {
         patientId: numericPatientId,
         drugTypeId: drugTypeId,
         totalVolumeMl: Math.round(prescriptionData.totalVolume), // Integer로 변환
@@ -853,15 +877,27 @@ export const useWardStore = create<WardStore>((set, get) => ({
         durationHours: prescriptionData.duration / 60, // 분을 시간으로 변환 (Double 유지)
         specialInstructions: prescriptionData.notes || '',
         status: 'PRESCRIBED',
-        prescribedBy: prescriptionData.prescribedBy
+        prescribedBy: prescriptionData.prescribedBy,
+        startedAt: prescriptionData.startedAt?.toISOString() || new Date().toISOString() // 투여 시작 시간 포함
       };
 
       console.log('📤 [PRESCRIPTION-API] 백엔드로 전송할 데이터:', JSON.stringify(prescriptionRequest, null, 2));
       const response = await prescriptionAPI.createPrescription(prescriptionRequest);
-      console.log('📥 [PRESCRIPTION-API] 백엔드 응답:', response);
+      console.log('📥 [PRESCRIPTION-API] 백엔드 응답:', JSON.stringify(response, null, 2));
 
       if (response.success && response.data) {
-        console.log('처방이 성공적으로 저장되었습니다:', response.data);
+        console.log('✅ [DB-SUCCESS] 처방이 데이터베이스에 성공적으로 저장되었습니다!');
+        console.log('📋 [DB-DATA] 저장된 처방 정보:', {
+          prescriptionId: response.data.id,
+          patientId: response.data.patientId,
+          drugTypeId: response.data.drugTypeId,
+          medicationName: matchedDrugName,
+          totalVolume: response.data.totalVolumeMl,
+          duration: response.data.durationHours,
+          status: response.data.status,
+          prescribedAt: response.data.prescribedAt,
+          startedAt: response.data.startedAt
+        });
 
         // 즉시 로컬 상태 업데이트 (UI 즉시 반영)
         const newPrescription: IVPrescription = {
@@ -900,17 +936,31 @@ export const useWardStore = create<WardStore>((set, get) => ({
         console.log(`💾 [PRESCRIPTION-STORAGE] ${patientId} localStorage 저장 시작`);
         get().saveToStorage();
 
-        // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
+        // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함) - DB 저장 성공해도 localStorage는 항상 백업
         storageService.savePrescriptionForPatient(patientId, newPrescription);
-        console.log(`✅ [PRESCRIPTION-STORAGE] ${patientId} localStorage 저장 완료`);
+        console.log(`✅ [PRESCRIPTION-STORAGE] ${patientId} localStorage 백업 완료 (DB 동기화됨)`);
 
-        console.log(`✅ [PRESCRIPTION] ${patientId} 처방 추가 완료 - 백그라운드 동기화 제거됨`);
+        console.log(`✅ [PRESCRIPTION] ${patientId} 처방 추가 완료 - DB 저장 성공, localStorage 백업 완료`);
 
         // 🔥 REMOVED: Background fetchPatients to prevent data overwriting
         // The local state is now the source of truth until manual refresh
 
       } else {
-        console.error('처방 저장 실패:', response.error);
+        console.error('❌ [DB-FAIL] 처방 데이터베이스 저장 실패!');
+        console.error('📋 [ERROR-DETAILS] 응답 상세:', {
+          success: response.success,
+          error: response.error,
+          message: response.message,
+          data: response.data
+        });
+        console.warn('⚠️ [FALLBACK] localStorage로만 처방 정보 저장 (오프라인 모드)');
+
+        // 사용자에게 DB 저장 실패 알림 (에러 상태 설정)
+        set({
+          error: `⚠️ 처방 정보가 서버에 저장되지 않았습니다. 로컬에만 저장되었습니다.\n원인: ${response.error || '알 수 없는 오류'}`,
+          isLoading: false
+        });
+
         // 백엔드 실패 시 로컬만 업데이트
         const prescription = createIVPrescription(
           prescriptionData.medicationName,
@@ -946,12 +996,20 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
         // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
         storageService.savePrescriptionForPatient(patientId, prescription);
-        console.log(`✅ [PRESCRIPTION-OFFLINE] ${patientId} localStorage 저장 완료`);
+        console.log(`✅ [PRESCRIPTION-OFFLINE] ${patientId} localStorage 저장 완료 (서버 저장 실패)`);
 
         get().triggerPrescriptionCallbacks(patientId);
       }
     } catch (error) {
-      console.error('처방 생성 중 오류:', error);
+      console.error('❌ [EXCEPTION] 처방 생성 중 예외 발생:', error);
+
+      // 사용자에게 예외 알림 (에러 상태 설정)
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+      set({
+        error: `처방 정보 저장 중 오류가 발생했습니다: ${errorMessage}. 로컬에만 저장되었습니다.`,
+        isLoading: false
+      });
+
       // 오류 발생 시 로컬만 업데이트
       const prescription = createIVPrescription(
         prescriptionData.medicationName,
@@ -987,7 +1045,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
       // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
       storageService.savePrescriptionForPatient(patientId, prescription);
-      console.log(`✅ [PRESCRIPTION-ERROR] ${patientId} localStorage 저장 완료`);
+      console.log(`✅ [PRESCRIPTION-ERROR] ${patientId} localStorage 저장 완료 (예외 발생)`);
 
       get().triggerPrescriptionCallbacks(patientId);
     }

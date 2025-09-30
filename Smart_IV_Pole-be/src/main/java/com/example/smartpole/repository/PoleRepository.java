@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PoleRepository extends JpaRepository<Pole, String> {
@@ -28,4 +29,20 @@ public interface PoleRepository extends JpaRepository<Pole, String> {
     // Count active poles
     @Query("SELECT COUNT(p) FROM Pole p WHERE p.status = 'active'")
     Long countActivePoles();
+
+    // Find pole by pole ID (for MQTT updates)
+    Optional<Pole> findByPoleId(String poleId);
+
+    // Patient assignment queries
+    List<Pole> findByPatientId(Integer patientId);
+
+    Optional<Pole> findByPatientIdAndStatus(Integer patientId, Pole.PoleStatus status);
+
+    @Query("SELECT p FROM Pole p WHERE p.patientId IS NULL AND p.status = 'active'")
+    List<Pole> findAvailablePoles();
+
+    @Query("SELECT p FROM Pole p WHERE p.patientId IS NOT NULL")
+    List<Pole> findAssignedPoles();
+
+    boolean existsByPatientId(Integer patientId);
 }

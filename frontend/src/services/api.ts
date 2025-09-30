@@ -229,8 +229,8 @@ export const prescriptionAPI = {
     return apiRequest<PrescriptionDB[]>(`/prescriptions/patient/${patientId}/active`);
   },
 
-  // 처방 생성
-  async createPrescription(prescription: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'startedAt' | 'completedAt'>): Promise<ApiResponse<PrescriptionDB>> {
+  // 처방 생성 (startedAt은 프론트엔드에서 보내므로 타입에 포함)
+  async createPrescription(prescription: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt'>): Promise<ApiResponse<PrescriptionDB>> {
     return apiRequest<PrescriptionDB>('/prescriptions', {
       method: 'POST',
       body: JSON.stringify(prescription),
@@ -415,6 +415,54 @@ export const monitoringAPI = {
       body: JSON.stringify(data),
     });
   },
+};
+
+// 기본 약품 목록 (한국 병원 일반적인 IV 약품)
+const DEFAULT_DRUGS = [
+  'Normal Saline 0.9% 500mL',
+  'Normal Saline 0.9% 1000mL',
+  '5% Dextrose 500mL',
+  '5% Dextrose 1000mL',
+  'Hartmann Solution 500mL',
+  'Hartmann Solution 1000mL',
+  'Ringer Lactate 500mL',
+  'Ringer Lactate 1000mL',
+  'Mannitol 20% 250mL',
+  'Albumin 5% 250mL',
+  'Albumin 5% 500mL',
+  'Glucose 50% 50mL',
+  'Sodium Bicarbonate 8.4% 20mL',
+  'Potassium Chloride 15mEq/10mL',
+  'Calcium Gluconate 10% 10mL'
+];
+
+// 백엔드 DB에 기본 약품 목록 초기화 (서버 재시작 시 자동 호출)
+export const initializeDefaultDrugs = async (): Promise<void> => {
+  try {
+    console.log('💊 [INIT] 약품 목록 초기화 시작...');
+
+    // 기존 약품 목록 확인
+    const existingDrugsResponse = await dripAPI.getDrips();
+    const existingDrugs = existingDrugsResponse.success ? existingDrugsResponse.data || [] : [];
+
+    if (existingDrugs.length > 0) {
+      console.log('💊 [INIT] 이미 약품이 존재합니다:', existingDrugs.length, '개');
+      return;
+    }
+
+    // 기본 약품 목록 등록
+    console.log('💊 [INIT] 기본 약품 목록 등록 중...', DEFAULT_DRUGS.length, '개');
+    const promises = DEFAULT_DRUGS.map(drugName =>
+      dripAPI.createDrip({ dripName: drugName })
+    );
+
+    const results = await Promise.all(promises);
+    const successCount = results.filter(r => r.success).length;
+
+    console.log(`✅ [INIT] 약품 초기화 완료: ${successCount}/${DEFAULT_DRUGS.length}개 등록됨`);
+  } catch (error) {
+    console.error('❌ [INIT] 약품 초기화 실패:', error);
+  }
 };
 
 // Mock 데이터 사용 여부 확인 및 폴백

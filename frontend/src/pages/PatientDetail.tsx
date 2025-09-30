@@ -137,9 +137,11 @@ const PatientDetail: React.FC = () => {
 
   const prescription = patient?.currentPrescription;
 
-  const progress = (prescription && prescription.prescribedAt) ? calculateProgress(prescription.prescribedAt, prescription.duration, currentTime) : 0;
-  const remainingTime = (prescription && prescription.prescribedAt) ? calculateRemainingTime(prescription.prescribedAt, prescription.duration, currentTime) : 0;
-  const estimatedEndTime = (prescription && prescription.prescribedAt) ? calculateEstimatedEndTime(prescription.prescribedAt, prescription.duration) : null;
+  // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
+  const startTime = prescription?.startedAt || prescription?.prescribedAt;
+  const progress = (prescription && startTime) ? calculateProgress(startTime, prescription.duration, currentTime) : 0;
+  const remainingTime = (prescription && startTime) ? calculateRemainingTime(startTime, prescription.duration, currentTime) : 0;
+  const estimatedEndTime = (prescription && startTime) ? calculateEstimatedEndTime(startTime, prescription.duration) : null;
 
   const getStatusColor = () => {
     if (!patientPoleData || patientPoleData.status === 'offline') return 'text-gray-500';

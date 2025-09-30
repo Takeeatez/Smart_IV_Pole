@@ -106,6 +106,29 @@ Located in `frontend/src/utils/gttCalculator.ts` with medical-grade precision.
 
 ## Critical Architecture Patterns
 
+### Drug Administration Workflow Separation
+**Problem Solved**: Separate patient registration from drug prescription to align with backend API structure and improve workflow clarity.
+
+**Implementation**:
+1. **PatientModal**: Handles only patient registration (name, age, room assignment)
+2. **DrugPrescriptionModal**: Independent drug prescription interface
+3. **Backend Integration**: DrugType CRUD API at `/api/v1/drips`
+4. **Workflow**: Patient registration → bed assignment → separate drug prescription
+
+```typescript
+// Key API: DrugType CRUD operations
+GET    /api/v1/drips           # Get all drug types
+POST   /api/v1/drips           # Create new drug type
+PUT    /api/v1/drips/{id}      # Update drug type
+DELETE /api/v1/drips/{id}      # Delete drug type
+```
+
+**Component Integration**:
+- DrugPrescriptionModal loads available drugs from backend on open
+- Graceful fallback when backend unavailable
+- GTT calculations remain in frontend with real-time preview
+- Separation improves maintainability and aligns with medical workflow
+
 ### Bed Assignment Persistence System
 **Problem Solved**: Patients stay assigned to specific beds (301A-1 through 301A-6) after page navigation/refresh.
 
@@ -136,9 +159,11 @@ if (dbPatient.roomId && dbPatient.bedNumber) {
 
 **Key Actions**:
 - `fetchPatients()`: Load patients from database with bed assignment
-- `addPatient()`: Create patient with bed assignment in database
+- `addPatient()`: Create patient with bed assignment in database (no prescription)
+- `addIVPrescription()`: Separate function for drug prescription management
 - `checkConnection()`: Test backend connectivity and sync data
 - `convertDBPatientToFrontend()`: Handle bed assignment priority logic
+- `convertFrontendPatientToDB()`: Handle age→birthDate schema conversion
 
 ### Data Flow Architecture
 ```
@@ -152,7 +177,8 @@ React Components (persistent across navigation)
 ### Component Architecture
 - **WardOverview**: Main dashboard with 6-bed grid layout and real-time monitoring
 - **PatientList**: Comprehensive patient management with search and GTT calculator
-- **PatientModal**: Patient registration with bed selection and IV prescription setup
+- **PatientModal**: Patient registration with bed selection (IV prescription removed)
+- **DrugPrescriptionModal**: Separate drug prescription interface with backend integration
 - **BedCard**: Individual bed status with color-coded visual indicators
 
 ## Key Features Implemented
@@ -160,9 +186,11 @@ React Components (persistent across navigation)
 - ✅ **Database Integration**: Full Spring Boot + MariaDB backend with RESTful API
 - ✅ **Bed Assignment Persistence**: room_id + bed_number database columns with priority system
 - ✅ **Patient Management**: Complete CRUD operations with automatic bed assignment
+- ✅ **Drug Administration System**: Separate drug prescription workflow with backend API
 - ✅ **Ward Monitoring**: 6-bed dashboard with real-time status and color coding
 - ✅ **GTT Calculator**: Medical-grade IV infusion rate calculations with nurse workflow
 - ✅ **Alert System**: Priority-based notifications with severity levels
+- ✅ **Workflow Separation**: Patient registration and drug prescription as independent workflows
 - ✅ **Offline Resilience**: localStorage backup when backend unavailable
 - ✅ **Data Synchronization**: Automatic sync between frontend and database
 - 🚧 ESP32 hardware integration (in development - currently mock data)
@@ -184,9 +212,16 @@ React Components (persistent across navigation)
 ## Common Development Tasks
 
 ### Adding New Patient
-1. Use `wardStore.addPatient()` with bed assignment
+1. Use `wardStore.addPatient()` with bed assignment (patient info only)
 2. Backend automatically stores in database with room_id/bed_number
 3. Frontend updates immediately with bed persistence
+4. Drug prescription is separate workflow via DrugPrescriptionModal
+
+### Adding Drug Prescription
+1. Use DrugPrescriptionModal component with patient reference
+2. Modal loads available drugs from `/api/v1/drips` endpoint
+3. GTT calculations performed in frontend with real-time preview
+4. Prescription stored via `addIVPrescription()` store method
 
 ### Debugging Bed Assignment Issues
 1. Check `convertDBPatientToFrontend()` priority logic in wardStore.ts
@@ -208,6 +243,14 @@ curl http://localhost:8081/api/v1/patients
 curl -X POST http://localhost:8081/api/v1/patients \
   -H "Content-Type: application/json" \
   -d '{"name":"Test Patient","phone":"010-1234-5678","birthDate":"1990-01-01","gender":"male","roomId":"301A","bedNumber":"2"}'
+
+# Test drug types API
+curl http://localhost:8081/api/v1/drips
+
+# Test drug type creation
+curl -X POST http://localhost:8081/api/v1/drips \
+  -H "Content-Type: application/json" \
+  -d '{"dripName":"Normal Saline 500mL"}'
 ```
 
 ## Medical Compliance & UI Standards
@@ -247,6 +290,9 @@ curl -X POST http://localhost:8081/api/v1/patients \
 
 ### Important Notes
 - **Bed Assignment**: Database persistence is critical - always include room_id and bed_number
+- **Workflow Separation**: Keep patient registration and drug prescription as separate operations
+- **Schema Compatibility**: Frontend uses `age` but backend expects `birthDate` (auto-converted)
 - **Page Navigation**: WardOverview calls `fetchPatients()` on every entry for fresh data
 - **Offline Mode**: Frontend gracefully falls back to localStorage when backend unavailable
 - **Medical Accuracy**: GTT calculations follow hospital protocols with proper rounding
+- **Drug API Integration**: DrugPrescriptionModal requires backend connectivity for drug list

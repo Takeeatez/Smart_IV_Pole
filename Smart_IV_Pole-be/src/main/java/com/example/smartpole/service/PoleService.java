@@ -91,4 +91,69 @@ public class PoleService {
     public boolean existsById(String poleId) {
         return poleRepository.existsById(poleId);
     }
+
+    // Patient assignment methods
+    public List<Pole> getAvailablePoles() {
+        return poleRepository.findAvailablePoles();
+    }
+
+    public List<Pole> getAssignedPoles() {
+        return poleRepository.findAssignedPoles();
+    }
+
+    public List<Pole> getPolesByPatient(Integer patientId) {
+        return poleRepository.findByPatientId(patientId);
+    }
+
+    public Optional<Pole> getActivePoleByPatient(Integer patientId) {
+        return poleRepository.findByPatientIdAndStatus(patientId, Pole.PoleStatus.active);
+    }
+
+    public boolean isPatientAssignedToPole(Integer patientId) {
+        return poleRepository.existsByPatientId(patientId);
+    }
+
+    @Transactional
+    public Pole assignPoleToPatient(String poleId, Integer patientId) {
+        Pole pole = poleRepository.findById(poleId)
+                .orElseThrow(() -> new RuntimeException("Pole not found with id: " + poleId));
+
+        if (pole.isAssigned()) {
+            throw new RuntimeException("Pole " + poleId + " is already assigned to patient " + pole.getPatientId());
+        }
+
+        if (pole.getStatus() != Pole.PoleStatus.active) {
+            throw new RuntimeException("Pole " + poleId + " is not active and cannot be assigned");
+        }
+
+        // Check if patient already has a pole assigned
+        if (poleRepository.existsByPatientId(patientId)) {
+            throw new RuntimeException("Patient " + patientId + " already has a pole assigned");
+        }
+
+        pole.assignToPatient(patientId);
+        return poleRepository.save(pole);
+    }
+
+    @Transactional
+    public Pole unassignPole(String poleId) {
+        Pole pole = poleRepository.findById(poleId)
+                .orElseThrow(() -> new RuntimeException("Pole not found with id: " + poleId));
+
+        if (!pole.isAssigned()) {
+            throw new RuntimeException("Pole " + poleId + " is not assigned to any patient");
+        }
+
+        pole.unassign();
+        return poleRepository.save(pole);
+    }
+
+    @Transactional
+    public void unassignPatientFromAllPoles(Integer patientId) {
+        List<Pole> assignedPoles = poleRepository.findByPatientId(patientId);
+        for (Pole pole : assignedPoles) {
+            pole.unassign();
+            poleRepository.save(pole);
+        }
+    }
 }

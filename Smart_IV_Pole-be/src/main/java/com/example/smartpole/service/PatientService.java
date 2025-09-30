@@ -2,6 +2,7 @@ package com.example.smartpole.service;
 
 import com.example.smartpole.entity.Patient;
 import com.example.smartpole.repository.PatientRepository;
+import com.example.smartpole.repository.PrescriptionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,6 +16,7 @@ import java.util.Optional;
 public class PatientService {
 
     private final PatientRepository patientRepository;
+    private final PrescriptionRepository prescriptionRepository;
 
     public List<Patient> getAllPatients() {
         return patientRepository.findAll();
@@ -66,6 +68,15 @@ public class PatientService {
 
     @Transactional
     public void deletePatient(Integer id) {
+        // Check if patient exists
+        if (!patientRepository.existsById(id)) {
+            throw new RuntimeException("Patient not found with id: " + id);
+        }
+
+        // Delete all prescriptions for this patient first (cascade deletion)
+        prescriptionRepository.deleteByPatientId(id);
+
+        // Then delete the patient
         patientRepository.deleteById(id);
     }
 

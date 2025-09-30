@@ -55,7 +55,20 @@ public class Patient {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @Column(name = "assigned_pole_id", length = 20)
+    private String assignedPoleId; // 할당된 폴대 ID (optional bidirectional reference)
+
+    // Bidirectional relationship with Pole
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_pole_id", insertable = false, updatable = false)
+    private Pole assignedPole;
+
     public enum Gender {
         male, female
+    }
+
+    // Utility methods for pole assignment
+    public boolean hasPoleAssigned() {
+        return assignedPoleId != null;
     }
 }

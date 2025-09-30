@@ -10,7 +10,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: update
       naming:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     properties:
@@ -30,9 +30,28 @@ spring:
 server:
   port: 8081
 
+# MQTT Configuration
+mqtt:
+  broker:
+    url: tcp://localhost:1883
+  client:
+    id: smart-iv-backend
+  username: ""
+  password: ""
+  topics:
+    telemetry: hospital/pole/+/telemetry
+    alerts: hospital/alert/#
+    status: hospital/pole/+/status
+    nurse:
+      call: hospital/nurse/call/+
+  qos:
+    default: 1
+    critical: 2
+
 # Logging
 logging:
   level:
     com.example.smartpole: INFO
     org.hibernate.SQL: ERROR
     org.hibernate.type.descriptor.sql.BasicBinder: ERROR
+    org.springframework.integration.mqtt: INFO

@@ -1,6 +1,7 @@
 package com.example.smartpole.service;
 
 import com.example.smartpole.entity.InfusionSession;
+import com.example.smartpole.entity.Pole;
 import com.example.smartpole.repository.InfusionSessionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ public class InfusionSessionService {
 
     private final InfusionSessionRepository infusionSessionRepository;
     private final AlertLogService alertLogService;
+    private final PoleService poleService;
 
     public List<InfusionSession> getAllSessions() {
         return infusionSessionRepository.findAll();
@@ -74,6 +76,31 @@ public class InfusionSessionService {
         Optional<InfusionSession> poleSession = getActiveSessionByPole(session.getIvPoleId());
         if (poleSession.isPresent()) {
             throw new RuntimeException("IV Pole is already in use");
+        }
+
+        // Validate that the patient has a pole assigned
+        if (!poleService.isPatientAssignedToPole(session.getPatientId())) {
+            throw new RuntimeException("Patient " + session.getPatientId() + " does not have a pole assigned. Please assign a pole before starting infusion.");
+        }
+
+        // Validate that the pole assigned to the patient matches the pole in the session
+        Optional<Pole> assignedPole = poleService.getActivePoleByPatient(session.getPatientId());
+        if (assignedPole.isPresent()) {
+            if (!assignedPole.get().getPoleId().equals(session.getIvPoleId())) {
+                throw new RuntimeException("Session pole ID (" + session.getIvPoleId() +
+                    ") does not match patient's assigned pole (" + assignedPole.get().getPoleId() + ")");
+            }
+        } else {
+            throw new RuntimeException("Patient " + session.getPatientId() + " has no active pole assigned");
+        }
+
+        // Validate that the pole exists and is active
+        Optional<Pole> pole = poleService.getPoleById(session.getIvPoleId());
+        if (pole.isEmpty()) {
+            throw new RuntimeException("Pole not found with ID: " + session.getIvPoleId());
+        }
+        if (pole.get().getStatus() != Pole.PoleStatus.active) {
+            throw new RuntimeException("Pole " + session.getIvPoleId() + " is not active (status: " + pole.get().getStatus() + ")");
         }
 
         session.setStartTime(LocalDateTime.now());
@@ -135,5 +162,13 @@ public class InfusionSessionService {
         session.setEndTime(LocalDateTime.now());
 
         return infusionSessionRepository.save(session);
+    }
+
+    @Transactional
+    public void deleteSession(Integer sessionId) {
+        InfusionSession session = infusionSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("Session not found with id: " + sessionId));
+
+        infusionSessionRepository.delete(session);
     }
 }

@@ -43,8 +43,11 @@ public class InfusionSession {
     @Column(name = "flow_rate", nullable = false, precision = 6, scale = 2)
     private BigDecimal flowRate;
 
-    @Column(name = "iv_pole_id", nullable = false, length = 20)
+    @Column(name = "iv_pole_id", nullable = true, length = 20)
     private String ivPoleId;
+
+    @Column(name = "prescription_id", nullable = false)
+    private Integer prescriptionId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -65,6 +68,10 @@ public class InfusionSession {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "iv_pole_id", insertable = false, updatable = false)
     private Pole pole;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "prescription_id", insertable = false, updatable = false)
+    private Prescription prescription;
 
     public enum SessionStatus {
         ACTIVE, PAUSED, ENDED

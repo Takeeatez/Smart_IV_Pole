@@ -114,7 +114,8 @@ const DrugPrescriptionModal: React.FC<DrugPrescriptionModalProps> = ({
       notes: prescriptionForm.notes,
       calculatedGTT: calculatedValues.gtt,
       calculatedFlowRate: calculatedValues.flowRate,
-      prescribedAt: new Date()
+      prescribedAt: new Date(),
+      startedAt: new Date() // 처방 추가 즉시 투여 시작으로 간주
     };
 
     // Add prescription to patient (now async with immediate UI update)

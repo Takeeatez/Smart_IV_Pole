@@ -13,7 +13,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/v1/infusions")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:5173"})
 public class InfusionSessionController {
 
     private final InfusionSessionService infusionSessionService;
@@ -126,6 +126,16 @@ public class InfusionSessionController {
         try {
             InfusionSession session = infusionSessionService.endInfusion(sessionId);
             return ResponseEntity.ok(session);
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/{sessionId}")
+    public ResponseEntity<Void> deleteInfusionSession(@PathVariable Integer sessionId) {
+        try {
+            infusionSessionService.deleteSession(sessionId);
+            return ResponseEntity.noContent().build();
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }

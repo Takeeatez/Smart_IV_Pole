@@ -11,7 +11,7 @@ interface PatientEditModalProps {
 }
 
 const PatientEditModal: React.FC<PatientEditModalProps> = ({ patient, isOpen, onClose }) => {
-  const { updatePatient, deletePatient, endIVSession } = useWardStore();
+  const { updatePatient, deletePatient, endIVSession, addIVPrescription } = useWardStore();
 
   // 환자 기본 정보
   const [name, setName] = useState(patient.name);
@@ -50,31 +50,39 @@ const PatientEditModal: React.FC<PatientEditModalProps> = ({ patient, isOpen, on
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
-    const updatedPatient: Patient = {
-      ...patient,
+  const handleSave = async () => {
+    // 1. 환자 기본 정보 업데이트
+    const updatedPatient: Partial<Patient> = {
       name,
       age,
       gender,
       height: height || undefined,
       weight: weight || undefined,
       allergies: allergies ? allergies.split(',').map(a => a.trim()).filter(a => a) : [],
-      nurseName,
-      currentPrescription: medicationName ? {
-        id: patient.currentPrescription?.id || `presc_${Date.now()}`,
+      nurseName
+    };
+
+    await updatePatient(patient.id, updatedPatient);
+
+    // 2. 처방 정보가 있고 변경되었으면 백엔드에 저장
+    if (medicationName && medicationName.trim() !== '') {
+      const prescriptionData: Omit<IVPrescription, 'id'> = {
         medicationName,
         totalVolume,
         duration,
         gttFactor,
         calculatedGTT,
         calculatedFlowRate,
-        prescribedBy,
+        prescribedBy: prescribedBy || patient.nurseName, // 기본값 사용
         prescribedAt: patient.currentPrescription?.prescribedAt || new Date(),
+        startedAt: patient.currentPrescription?.startedAt || new Date(), // 기존 투여 시작 시간 유지 또는 새로 시작
         notes: notes || undefined
-      } : undefined
-    };
+      };
 
-    updatePatient(patient.id, updatedPatient);
+      console.log(`💊 [EDIT-MODAL] ${patient.name} 처방 정보 백엔드 저장:`, prescriptionData.medicationName);
+      await addIVPrescription(patient.id, prescriptionData);
+    }
+
     onClose();
   };
 

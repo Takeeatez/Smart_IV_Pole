@@ -15,7 +15,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/v1/poles")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:5173"})
 public class PoleController {
 
     private final PoleService poleService;
@@ -119,5 +119,67 @@ public class PoleController {
     public ResponseEntity<Boolean> poleExists(@PathVariable String id) {
         boolean exists = poleService.existsById(id);
         return ResponseEntity.ok(exists);
+    }
+
+    // Patient assignment endpoints
+    @GetMapping("/available")
+    public ResponseEntity<List<Pole>> getAvailablePoles() {
+        List<Pole> poles = poleService.getAvailablePoles();
+        return ResponseEntity.ok(poles);
+    }
+
+    @GetMapping("/assigned")
+    public ResponseEntity<List<Pole>> getAssignedPoles() {
+        List<Pole> poles = poleService.getAssignedPoles();
+        return ResponseEntity.ok(poles);
+    }
+
+    @GetMapping("/patient/{patientId}")
+    public ResponseEntity<List<Pole>> getPolesByPatient(@PathVariable Integer patientId) {
+        List<Pole> poles = poleService.getPolesByPatient(patientId);
+        return ResponseEntity.ok(poles);
+    }
+
+    @GetMapping("/patient/{patientId}/active")
+    public ResponseEntity<Pole> getActivePoleByPatient(@PathVariable Integer patientId) {
+        Optional<Pole> pole = poleService.getActivePoleByPatient(patientId);
+        return pole.map(ResponseEntity::ok)
+                  .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/patient/{patientId}/assigned")
+    public ResponseEntity<Boolean> isPatientAssignedToPole(@PathVariable Integer patientId) {
+        boolean assigned = poleService.isPatientAssignedToPole(patientId);
+        return ResponseEntity.ok(assigned);
+    }
+
+    @PostMapping("/{poleId}/assign/{patientId}")
+    public ResponseEntity<Pole> assignPoleToPatient(@PathVariable String poleId, @PathVariable Integer patientId) {
+        try {
+            Pole pole = poleService.assignPoleToPatient(poleId, patientId);
+            return ResponseEntity.ok(pole);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @DeleteMapping("/{poleId}/unassign")
+    public ResponseEntity<Pole> unassignPole(@PathVariable String poleId) {
+        try {
+            Pole pole = poleService.unassignPole(poleId);
+            return ResponseEntity.ok(pole);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @DeleteMapping("/patient/{patientId}/unassign-all")
+    public ResponseEntity<Void> unassignPatientFromAllPoles(@PathVariable Integer patientId) {
+        try {
+            poleService.unassignPatientFromAllPoles(patientId);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 }

@@ -18,7 +18,8 @@ export interface IVPrescription {
   calculatedGTT: number; // GTT/min
   calculatedFlowRate: number; // mL/hr
   prescribedBy: string; // 의사명
-  prescribedAt: Date;
+  prescribedAt: Date; // 처방 작성 시간
+  startedAt?: Date; // 투여 시작 시간 (실제 IV 연결 시점)
   notes?: string;
 }
 
