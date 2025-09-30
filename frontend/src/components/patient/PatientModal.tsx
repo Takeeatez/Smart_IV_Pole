@@ -88,7 +88,8 @@ const PatientModal: React.FC<PatientModalProps> = ({
       nurseId: patientForm.nurseId,
       nurseName: patientForm.nurseName,
       admissionDate: new Date(),
-      medicalHistory: []
+      medicalHistory: [],
+      prescriptionHistory: []   // 필수 프로퍼티 추가
     };
 
     if (patient) {
@@ -99,10 +100,11 @@ const PatientModal: React.FC<PatientModalProps> = ({
       await addPatient(patientData, finalBedNumber);
     }
 
-    // 성공적으로 추가 후 1초 뒤 데이터 새로고침
+    // ✅ RESTORED: fetchPatients call (localStorage 처방 데이터는 wardStore에서 보존됨)
+    // 환자 추가/수정 후 데이터 동기화
     setTimeout(() => {
       fetchPatients();
-    }, 1000);
+    }, 500); // 짧은 지연으로 백엔드 업데이트 완료 대기
 
     onClose();
   };

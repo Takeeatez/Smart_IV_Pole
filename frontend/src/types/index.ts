@@ -37,6 +37,7 @@ export interface Patient {
   height?: number; // cm
   allergies?: string[];
   currentPrescription?: IVPrescription;
+  prescriptionHistory: IVPrescription[]; // 투여 이력 추가
   medicalHistory?: string[];
   discharged?: boolean;
   dischargedAt?: Date;

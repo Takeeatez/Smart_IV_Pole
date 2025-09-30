@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Patient, PoleData, Alert, BedInfo, WardStats, StatusColor, IVPrescription } from '../types';
 import { createIVPrescription } from '../utils/gttCalculator';
-import { patientAPI, ivSessionAPI, checkServerConnection, PatientDB, IVSessionDB } from '../services/api';
+import { patientAPI, prescriptionAPI, ivSessionAPI, checkServerConnection, PatientDB, PrescriptionDB, IVSessionDB, dripAPI } from '../services/api';
 import storageService from '../services/storageService';
 
 interface WardStore {
@@ -16,7 +16,8 @@ interface WardStore {
   error: string | null;
   isServerConnected: boolean;
   patientBedMapping: Map<string, string>; // patientId -> bedNumber mapping
-  
+  prescriptionCallbacks: Map<string, () => void>; // 🔄 NEW: 처방 정보 변경 콜백
+
   // Actions
   updatePoleData: (poleId: string, data: Partial<PoleData>) => void;
   addAlert: (alert: Alert) => void;
@@ -35,7 +36,7 @@ interface WardStore {
   removePatient: (patientId: string) => Promise<void>;
   deletePatient: (patientId: string) => Promise<void>;
   endIVSession: (patientId: string) => Promise<void>;
-  addIVPrescription: (patientId: string, prescription: Omit<IVPrescription, 'id'>) => void;
+  addIVPrescription: (patientId: string, prescription: Omit<IVPrescription, 'id'>) => Promise<void>;
   updateIVPrescription: (patientId: string, prescription: Partial<IVPrescription>) => void;
   
   // Getters
@@ -47,6 +48,18 @@ interface WardStore {
   
   // Server connection
   checkConnection: () => Promise<void>;
+
+  // 🔄 NEW: Real-time sync callbacks
+  registerPrescriptionCallback: (patientId: string, callback: () => void) => void;
+  unregisterPrescriptionCallback: (patientId: string) => void;
+  triggerPrescriptionCallbacks: (patientId: string) => void;
+  forcePrescriptionSync: (patientId: string) => Promise<void>;
+
+  // 🔄 NEW: Navigation-safe methods
+  validatePrescriptionData: (patientId: string) => boolean;
+  autoRecoverPrescription: (patientId: string) => Promise<boolean>;
+  ensurePrescriptionConsistency: (patientId: string) => Promise<void>;
+  getPrescriptionStatus: (patientId: string) => 'loading' | 'available' | 'missing' | 'error';
 }
 
 // Helper function to determine status color based on pole data
@@ -58,9 +71,31 @@ const getStatusColor = (poleData?: PoleData): StatusColor => {
   return 'normal';
 };
 
+// Helper function to convert DB prescription to frontend IVPrescription type
+const convertDBPrescriptionToFrontend = (dbPrescription: PrescriptionDB, drugName: string): IVPrescription => {
+  return {
+    id: `RX${dbPrescription.id}`,
+    medicationName: drugName,
+    totalVolume: dbPrescription.totalVolumeMl,
+    duration: dbPrescription.durationHours * 60, // Convert hours to minutes
+    gttFactor: dbPrescription.gttFactor as 20 | 60,
+    calculatedGTT: dbPrescription.calculatedGtt,
+    calculatedFlowRate: dbPrescription.infusionRateMlHr,
+    prescribedBy: dbPrescription.prescribedBy,
+    prescribedAt: new Date(dbPrescription.prescribedAt || Date.now()),
+    notes: dbPrescription.specialInstructions || undefined,
+  };
+};
+
 // Helper function to convert DB patient to frontend Patient type
 // 매핑 테이블을 사용하여 올바른 침대 할당
-const convertDBPatientToFrontend = (dbPatient: PatientDB, existingPatient?: Patient, patientBedMapping?: Map<string, string>): Patient => {
+const convertDBPatientToFrontend = (
+  dbPatient: PatientDB,
+  existingPatient?: Patient,
+  patientBedMapping?: Map<string, string>,
+  currentPrescription?: IVPrescription,
+  prescriptionHistory?: IVPrescription[]
+): Patient => {
   const patientId = `P${dbPatient.patientId}`;
 
   // 🔄 NEW: DB에서 침대 정보를 직접 사용 (매핑 시스템보다 우선)
@@ -96,6 +131,22 @@ const convertDBPatientToFrontend = (dbPatient: PatientDB, existingPatient?: Pati
   const nurseId = existingPatient?.nurseId || 'N001';
   const nurseName = existingPatient?.nurseName || '김수연';
 
+  // 🔄 Enhanced data preservation logic for prescriptions
+  // Priority: currentPrescription (DB) > existing local prescription > undefined
+  // If DB doesn't have prescription but local state does, preserve local state
+  let finalCurrentPrescription = currentPrescription;
+  let finalPrescriptionHistory = prescriptionHistory || [];
+
+  if (!currentPrescription && existingPatient?.currentPrescription) {
+    console.log(`💾 [DATA-PRESERVE] Preserving local prescription for ${dbPatient.name}: ${existingPatient.currentPrescription.medicationName}`);
+    finalCurrentPrescription = existingPatient.currentPrescription;
+  }
+
+  if (prescriptionHistory.length === 0 && existingPatient?.prescriptionHistory && existingPatient.prescriptionHistory.length > 0) {
+    console.log(`💾 [DATA-PRESERVE] Preserving local prescription history for ${dbPatient.name}: ${existingPatient.prescriptionHistory.length} items`);
+    finalPrescriptionHistory = existingPatient.prescriptionHistory;
+  }
+
   return {
     id: patientId,
     name: dbPatient.name,
@@ -110,7 +161,8 @@ const convertDBPatientToFrontend = (dbPatient: PatientDB, existingPatient?: Pati
     height: dbPatient.heightCm,
     allergies: existingPatient?.allergies || undefined,
     medicalHistory: existingPatient?.medicalHistory || [],
-    currentPrescription: existingPatient?.currentPrescription,
+    currentPrescription: finalCurrentPrescription,
+    prescriptionHistory: finalPrescriptionHistory,
     phone: dbPatient.phone
   };
 };
@@ -150,6 +202,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
   error: null,
   isServerConnected: false,
   patientBedMapping: new Map(),
+  prescriptionCallbacks: new Map(), // 🔄 NEW: 콜백 시스템 초기화
 
   // Actions
   updatePoleData: (poleId: string, data: Partial<PoleData>) => {
@@ -295,27 +348,127 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
   // Fetch patients from server
   fetchPatients: async () => {
+    const startTime = Date.now();
+    console.log('🚀 [TIMING] fetchPatients 시작 -', new Date().toISOString());
+
     set({ isLoading: true, error: null });
-    
+
     try {
+      console.log('🔄 [TIMING] 환자 API 호출 시작');
       const response = await patientAPI.getPatients();
+      console.log('✅ [TIMING] 환자 API 응답 완료 -', Date.now() - startTime, 'ms');
 
       if (response.success && response.data) {
         // response.data가 배열인지 확인
         const patientsArray = Array.isArray(response.data) ? response.data : [response.data];
+        console.log('📊 [TIMING] 환자 데이터 가공 시작 - 환자 수:', patientsArray.length);
 
-        // 기존 환자 정보 유지를 위해 현재 patients 배열 참조
+        // Load drug types for prescription mapping (with localStorage caching)
+        console.log('💊 [TIMING] 약품 타입 로딩 시작');
+        let drugs: any[] = [];
+
+        // Try to load from localStorage first
+        const cachedDrugs = storageService.loadDrugTypes();
+        if (cachedDrugs && cachedDrugs.length > 0) {
+          console.log('💊 [CACHE] localStorage에서 약품 타입 로드:', cachedDrugs.length, '개');
+          drugs = cachedDrugs;
+        } else {
+          // Fallback to API call
+          console.log('💊 [API] 백엔드에서 약품 타입 로드');
+          const drugsResponse = await dripAPI.getDrips();
+          drugs = drugsResponse.success ? drugsResponse.data || [] : [];
+
+          // Save to localStorage for next time
+          if (drugs.length > 0) {
+            storageService.saveDrugTypes(drugs);
+          }
+        }
+
+        const drugMap = new Map(drugs.map(drug => [drug.dripId, drug.dripName]));
+        console.log('✅ [TIMING] 약품 타입 로딩 완료 -', Date.now() - startTime, 'ms');
+
+        // 💊 Load localStorage prescription data for overlay
+        console.log('💊 [TIMING] localStorage 처방 데이터 로딩 시작');
+        const storedPrescriptions = storageService.loadPrescriptions();
+        console.log('💊 [CACHE] localStorage 처방 데이터:', storedPrescriptions?.size || 0, '개');
+
+        // Load prescriptions and combine with patient data
         const existingPatients = get().patients;
-
-        const patients: Patient[] = patientsArray.map(dbPatient => {
+        console.log('🔄 [TIMING] 처방 정보 로딩 시작');
+        const patients: Patient[] = await Promise.all(patientsArray.map(async (dbPatient) => {
+          const patientStartTime = Date.now();
           // 기존 환자 찾기 (ID로 매칭)
           const existingPatient = existingPatients.find(p => p.id === `P${dbPatient.patientId}`);
-          return convertDBPatientToFrontend(dbPatient, existingPatient, get().patientBedMapping);
-        });
-        
+
+          // Load ALL prescriptions for this patient (현재 + 이력)
+          let currentPrescription: IVPrescription | undefined;
+          let prescriptionHistory: IVPrescription[] = [];
+
+          try {
+            const prescriptionsResponse = await prescriptionAPI.getPatientPrescriptions(dbPatient.patientId!);
+            if (prescriptionsResponse.success && prescriptionsResponse.data && prescriptionsResponse.data.length > 0) {
+              // 모든 처방을 상태별로 분류
+              const allPrescriptions = prescriptionsResponse.data;
+
+              // ACTIVE/PRESCRIBED 상태 = 현재 처방 (가장 최근 것)
+              const activePrescriptions = allPrescriptions.filter(p =>
+                p.status === 'ACTIVE' || p.status === 'PRESCRIBED'
+              );
+
+              // COMPLETED/CANCELLED 상태 = 이력
+              const historyPrescriptions = allPrescriptions.filter(p =>
+                p.status === 'COMPLETED' || p.status === 'CANCELLED'
+              );
+
+              // 현재 처방 설정 (가장 최근 ACTIVE/PRESCRIBED)
+              if (activePrescriptions.length > 0) {
+                const dbPrescription = activePrescriptions[0];
+                const drugName = drugMap.get(dbPrescription.drugTypeId) || 'Unknown Drug';
+                currentPrescription = convertDBPrescriptionToFrontend(dbPrescription, drugName);
+                console.log(`💊 [TIMING] ${dbPatient.name} 현재 처방: ${drugName} (상태: ${dbPrescription.status})`);
+              }
+
+              // 처방 이력 변환
+              prescriptionHistory = historyPrescriptions.map(dbPrescription => {
+                const drugName = drugMap.get(dbPrescription.drugTypeId) || 'Unknown Drug';
+                return convertDBPrescriptionToFrontend(dbPrescription, drugName);
+              });
+
+              console.log(`📋 [TIMING] ${dbPatient.name} - 현재: ${currentPrescription ? '1개' : '없음'}, 이력: ${prescriptionHistory.length}개`);
+            } else {
+              console.log(`ℹ️ [TIMING] ${dbPatient.name} 처방 없음 (${Date.now() - patientStartTime}ms)`);
+            }
+          } catch (error) {
+            console.warn(`❌ [TIMING] ${dbPatient.name} 처방 로딩 실패 (${Date.now() - patientStartTime}ms):`, error);
+          }
+
+          // 💊 localStorage 처방 데이터 오버레이 (데이터베이스 처방보다 우선)
+          const patientId = `P${dbPatient.patientId}`;
+          if (storedPrescriptions?.has(patientId)) {
+            const storedPrescription = storedPrescriptions.get(patientId);
+            if (storedPrescription) {
+              console.log(`💊 [OVERLAY] ${dbPatient.name}에게 localStorage 처방 적용: ${storedPrescription.medicationName}`);
+              currentPrescription = storedPrescription;
+            }
+          }
+
+          const finalPatient = convertDBPatientToFrontend(
+            dbPatient,
+            existingPatient,
+            get().patientBedMapping,
+            currentPrescription,
+            prescriptionHistory
+          );
+          console.log(`👤 [TIMING] ${dbPatient.name} 변환 완료 - 현재처방: ${finalPatient.currentPrescription ? '있음' : '없음'}, 이력: ${finalPatient.prescriptionHistory.length}개`);
+          return finalPatient;
+        }));
+
+        console.log('✅ [TIMING] 모든 환자 처방 로딩 완료 -', Date.now() - startTime, 'ms');
+
         // 🔄 Critical Fix: Assign patients to beds for ward display
+        console.log('🔄 [TIMING] Zustand 상태 업데이트 시작');
         set((state) => {
-          console.log('📋 Assigning patients to beds:', patients);
+          console.log('📋 [TIMING] Assigning patients to beds:', patients.map(p => ({name: p.name, prescription: !!p.currentPrescription})));
 
           // Create updated beds array with database patients assigned
           const updatedBeds = state.beds.map(bed => {
@@ -326,7 +479,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
             );
 
             if (matchingPatient) {
-              console.log(`🛏️ Bed ${bed.bedNumber}: ${matchingPatient.name}`);
+              console.log(`🛏️ [TIMING] Bed ${bed.bedNumber}: ${matchingPatient.name} (처방: ${matchingPatient.currentPrescription ? '있음' : '없음'})`);
               return {
                 ...bed,
                 patient: matchingPatient,
@@ -334,7 +487,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
               };
             } else {
               // Clear bed if no patient matches (patient may have been discharged)
-              console.log(`🛏️ Bed ${bed.bedNumber}: Empty`);
+              console.log(`🛏️ [TIMING] Bed ${bed.bedNumber}: Empty`);
               return {
                 ...bed,
                 patient: undefined,
@@ -343,17 +496,24 @@ export const useWardStore = create<WardStore>((set, get) => ({
             }
           });
 
+          console.log('✅ [TIMING] Zustand 상태 업데이트 완료 -', Date.now() - startTime, 'ms');
           return {
             patients,
             beds: updatedBeds,
             isLoading: false
           };
         });
+
+        console.log('🎉 [TIMING] fetchPatients 완전 종료 -', Date.now() - startTime, 'ms');
+
+        // 🔄 Removed automatic callback triggers to prevent infinite loops
+        // Callbacks will be manually triggered only when needed
+
       } else {
         throw new Error(response.error || 'Failed to fetch patients');
       }
     } catch (error) {
-      console.error('Failed to fetch patients:', error);
+      console.error('❌ [TIMING] fetchPatients 오류 발생:', error);
       set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
       // 오류 시 목업 데이터 사용
       get().initializeMockData();
@@ -555,8 +715,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
           get().saveToStorage();
 
-          // 실시간 동기화: 데이터베이스에서 최신 환자 목록 다시 가져오기
-          await get().fetchPatients();
+          // 🔥 REMOVED: fetchPatients() to prevent overwriting localStorage prescription data
+          // Local state is now the source of truth for prescription data
         }
       } else {
         // 오프라인 모드 - 로컬에만 업데이트
@@ -642,17 +802,195 @@ export const useWardStore = create<WardStore>((set, get) => ({
     }
   },
 
-  addIVPrescription: (patientId: string, prescriptionData: Omit<IVPrescription, 'id'>) => {
-    const prescription = createIVPrescription(
-      prescriptionData.medicationName,
-      prescriptionData.totalVolume,
-      prescriptionData.duration,
-      prescriptionData.gttFactor,
-      prescriptionData.prescribedBy,
-      prescriptionData.notes
-    );
+  addIVPrescription: async (patientId: string, prescriptionData: Omit<IVPrescription, 'id'>) => {
+    console.log(`🏥 [PRESCRIPTION-START] ${patientId} 처방 생성 시작: ${prescriptionData.medicationName}`);
+    const patient = get().getPatientById(patientId);
+    if (patient) {
+      console.log(`👤 [PRESCRIPTION-PATIENT] ${patientId} 현재 환자 상태 - 기존 처방: ${patient.currentPrescription ? '있음' : '없음'}`);
+    }
 
-    get().updatePatient(patientId, { currentPrescription: prescription });
+    try {
+      // 약품명에서 drugTypeId 찾기 (localStorage 캐시 사용)
+      let drugTypeId = 1; // 기본값
+      try {
+        // Try localStorage first
+        let drugs: any[] = [];
+        const cachedDrugs = storageService.loadDrugTypes();
+        if (cachedDrugs && cachedDrugs.length > 0) {
+          console.log('💊 [PRESCRIPTION-CACHE] localStorage에서 약품 타입 로드');
+          drugs = cachedDrugs;
+        } else {
+          // Fallback to API
+          console.log('💊 [PRESCRIPTION-API] 백엔드에서 약품 타입 로드');
+          const drugsResponse = await dripAPI.getDrips();
+          drugs = drugsResponse.success ? drugsResponse.data || [] : [];
+
+          // Save to localStorage
+          if (drugs.length > 0) {
+            storageService.saveDrugTypes(drugs);
+          }
+        }
+
+        const matchingDrug = drugs.find(drug =>
+          drug.dripName === prescriptionData.medicationName
+        );
+        if (matchingDrug?.dripId) {
+          drugTypeId = matchingDrug.dripId;
+        }
+      } catch (error) {
+        console.warn('Failed to find drug type, using default ID:', error);
+      }
+
+      // 백엔드 Prescription API 호출
+      const numericPatientId = parseInt(patientId.replace('P', ''));
+      const prescriptionRequest: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'startedAt' | 'completedAt'> = {
+        patientId: numericPatientId,
+        drugTypeId: drugTypeId,
+        totalVolumeMl: Math.round(prescriptionData.totalVolume), // Integer로 변환
+        infusionRateMlHr: Math.round(prescriptionData.calculatedFlowRate), // Integer로 변환
+        gttFactor: prescriptionData.gttFactor, // 이미 integer
+        calculatedGtt: Math.round(prescriptionData.calculatedGTT), // Integer로 변환
+        durationHours: prescriptionData.duration / 60, // 분을 시간으로 변환 (Double 유지)
+        specialInstructions: prescriptionData.notes || '',
+        status: 'PRESCRIBED',
+        prescribedBy: prescriptionData.prescribedBy
+      };
+
+      console.log('📤 [PRESCRIPTION-API] 백엔드로 전송할 데이터:', JSON.stringify(prescriptionRequest, null, 2));
+      const response = await prescriptionAPI.createPrescription(prescriptionRequest);
+      console.log('📥 [PRESCRIPTION-API] 백엔드 응답:', response);
+
+      if (response.success && response.data) {
+        console.log('처방이 성공적으로 저장되었습니다:', response.data);
+
+        // 즉시 로컬 상태 업데이트 (UI 즉시 반영)
+        const newPrescription: IVPrescription = {
+          id: `RX${response.data.id}`,
+          ...prescriptionData
+        };
+
+        // 로컬 상태 즉시 업데이트
+        console.log(`💾 [PRESCRIPTION-LOCAL] ${patientId} 로컬 상태 업데이트 시작 - 처방: ${newPrescription.medicationName}`);
+        set((state) => {
+          const updatedPatients = state.patients.map(patient => {
+            if (patient.id === patientId) {
+              console.log(`📝 [PRESCRIPTION-UPDATE] ${patientId} 환자 처방 업데이트: ${patient.currentPrescription ? '교체' : '신규'}`);
+              return { ...patient, currentPrescription: newPrescription };
+            }
+            return patient;
+          });
+          return {
+            patients: updatedPatients,
+            beds: state.beds.map(bed => {
+              if (bed.patient?.id === patientId) {
+                return {
+                  ...bed,
+                  patient: { ...bed.patient, currentPrescription: newPrescription }
+                };
+              }
+              return bed;
+            })
+          };
+        });
+
+        // 처방 정보 변경 콜백 트리거 (실시간 동기화)
+        get().triggerPrescriptionCallbacks(patientId);
+
+        // 💾 localStorage에 상태 저장 (환자 등록과 동일한 패턴)
+        console.log(`💾 [PRESCRIPTION-STORAGE] ${patientId} localStorage 저장 시작`);
+        get().saveToStorage();
+
+        // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
+        storageService.savePrescriptionForPatient(patientId, newPrescription);
+        console.log(`✅ [PRESCRIPTION-STORAGE] ${patientId} localStorage 저장 완료`);
+
+        console.log(`✅ [PRESCRIPTION] ${patientId} 처방 추가 완료 - 백그라운드 동기화 제거됨`);
+
+        // 🔥 REMOVED: Background fetchPatients to prevent data overwriting
+        // The local state is now the source of truth until manual refresh
+
+      } else {
+        console.error('처방 저장 실패:', response.error);
+        // 백엔드 실패 시 로컬만 업데이트
+        const prescription = createIVPrescription(
+          prescriptionData.medicationName,
+          prescriptionData.totalVolume,
+          prescriptionData.duration,
+          prescriptionData.gttFactor,
+          prescriptionData.prescribedBy,
+          prescriptionData.notes
+        );
+
+        // 💾 로컬 상태와 localStorage 즉시 업데이트
+        console.log(`💾 [PRESCRIPTION-OFFLINE] ${patientId} 백엔드 실패 시 로컬 처방 저장`);
+        set((state) => ({
+          patients: state.patients.map(patient => {
+            if (patient.id === patientId) {
+              return { ...patient, currentPrescription: prescription };
+            }
+            return patient;
+          }),
+          beds: state.beds.map(bed => {
+            if (bed.patient?.id === patientId) {
+              return {
+                ...bed,
+                patient: { ...bed.patient, currentPrescription: prescription }
+              };
+            }
+            return bed;
+          })
+        }));
+
+        // localStorage에 저장
+        get().saveToStorage();
+
+        // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
+        storageService.savePrescriptionForPatient(patientId, prescription);
+        console.log(`✅ [PRESCRIPTION-OFFLINE] ${patientId} localStorage 저장 완료`);
+
+        get().triggerPrescriptionCallbacks(patientId);
+      }
+    } catch (error) {
+      console.error('처방 생성 중 오류:', error);
+      // 오류 발생 시 로컬만 업데이트
+      const prescription = createIVPrescription(
+        prescriptionData.medicationName,
+        prescriptionData.totalVolume,
+        prescriptionData.duration,
+        prescriptionData.gttFactor,
+        prescriptionData.prescribedBy,
+        prescriptionData.notes
+      );
+
+      // 💾 로컬 상태와 localStorage 즉시 업데이트
+      console.log(`💾 [PRESCRIPTION-ERROR] ${patientId} 오류 발생 시 로컬 처방 저장`);
+      set((state) => ({
+        patients: state.patients.map(patient => {
+          if (patient.id === patientId) {
+            return { ...patient, currentPrescription: prescription };
+          }
+          return patient;
+        }),
+        beds: state.beds.map(bed => {
+          if (bed.patient?.id === patientId) {
+            return {
+              ...bed,
+              patient: { ...bed.patient, currentPrescription: prescription }
+            };
+          }
+          return bed;
+        })
+      }));
+
+      // localStorage에 저장
+      get().saveToStorage();
+
+      // 🔥 NEW: 처방 정보 별도 저장 (약품 정보 포함)
+      storageService.savePrescriptionForPatient(patientId, prescription);
+      console.log(`✅ [PRESCRIPTION-ERROR] ${patientId} localStorage 저장 완료`);
+
+      get().triggerPrescriptionCallbacks(patientId);
+    }
   },
 
   updateIVPrescription: (patientId: string, prescriptionUpdates: Partial<IVPrescription>) => {
@@ -788,5 +1126,193 @@ export const useWardStore = create<WardStore>((set, get) => ({
     get().updateWardStats();
 
     console.log('✅ 목업 데이터 완전 제거됨 - 깨끗한 초기 상태');
+  },
+
+  // 🔄 NEW: Real-time sync callback system for PatientDetail
+  registerPrescriptionCallback: (patientId: string, callback: () => void) => {
+    console.log(`📞 [CALLBACK] 처방 정보 콜백 등록: ${patientId}`);
+    set((state) => {
+      const newCallbacks = new Map(state.prescriptionCallbacks);
+      newCallbacks.set(patientId, callback);
+      return { prescriptionCallbacks: newCallbacks };
+    });
+  },
+
+  unregisterPrescriptionCallback: (patientId: string) => {
+    console.log(`📞 [CALLBACK] 처방 정보 콜백 해제: ${patientId}`);
+    set((state) => {
+      const newCallbacks = new Map(state.prescriptionCallbacks);
+      newCallbacks.delete(patientId);
+      return { prescriptionCallbacks: newCallbacks };
+    });
+  },
+
+  triggerPrescriptionCallbacks: (patientId: string) => {
+    const callback = get().prescriptionCallbacks.get(patientId);
+    if (callback) {
+      console.log(`📞 [CALLBACK] 처방 정보 콜백 실행: ${patientId}`);
+      try {
+        callback();
+      } catch (error) {
+        console.error(`❌ [CALLBACK] 콜백 실행 실패 (${patientId}):`, error);
+      }
+    }
+  },
+
+  forcePrescriptionSync: async (patientId: string) => {
+    console.log(`🔄 [FORCE-SYNC] 개별 환자 처방 정보 강제 동기화: ${patientId}`);
+
+    try {
+      const numericId = parseInt(patientId.replace('P', ''));
+
+      // 1. 약품 타입 맵 로딩
+      const drugsResponse = await dripAPI.getDrips();
+      const drugs = drugsResponse.success ? drugsResponse.data || [] : [];
+      const drugMap = new Map(drugs.map(drug => [drug.dripId, drug.dripName]));
+
+      // 2. 해당 환자의 처방 정보만 로딩
+      const prescriptionsResponse = await prescriptionAPI.getPatientPrescriptions(numericId);
+
+      if (prescriptionsResponse.success && prescriptionsResponse.data && prescriptionsResponse.data.length > 0) {
+        const allPrescriptions = prescriptionsResponse.data;
+
+        // ACTIVE/PRESCRIBED 상태 = 현재 처방
+        const activePrescriptions = allPrescriptions.filter(p =>
+          p.status === 'ACTIVE' || p.status === 'PRESCRIBED'
+        );
+
+        let currentPrescription: IVPrescription | undefined;
+
+        if (activePrescriptions.length > 0) {
+          const dbPrescription = activePrescriptions[0];
+          const drugName = drugMap.get(dbPrescription.drugTypeId) || 'Unknown Drug';
+          currentPrescription = convertDBPrescriptionToFrontend(dbPrescription, drugName);
+          console.log(`💊 [FORCE-SYNC] ${patientId} 처방 정보 로딩 성공: ${drugName}`);
+        }
+
+        // 3. 환자 정보 업데이트
+        set((state) => ({
+          patients: state.patients.map(patient =>
+            patient.id === patientId
+              ? { ...patient, currentPrescription }
+              : patient
+          ),
+          beds: state.beds.map(bed => {
+            if (bed.patient?.id === patientId) {
+              return {
+                ...bed,
+                patient: { ...bed.patient, currentPrescription }
+              };
+            }
+            return bed;
+          })
+        }));
+
+        // 4. 콜백 트리거
+        get().triggerPrescriptionCallbacks(patientId);
+
+        console.log(`✅ [FORCE-SYNC] ${patientId} 처방 정보 강제 동기화 완료`);
+      } else {
+        console.log(`ℹ️ [FORCE-SYNC] ${patientId} 처방 정보 없음`);
+      }
+    } catch (error) {
+      console.error(`❌ [FORCE-SYNC] ${patientId} 처방 정보 강제 동기화 실패:`, error);
+    }
+  },
+
+  // 🔄 NEW: Navigation-safe methods implementation
+  validatePrescriptionData: (patientId: string): boolean => {
+    const patient = get().patients.find(p => p.id === patientId);
+    if (!patient) {
+      console.warn(`⚠️ [VALIDATE] Patient not found: ${patientId}`);
+      return false;
+    }
+
+    const hasPrescription = !!patient.currentPrescription;
+    const prescriptionValid = !!(hasPrescription &&
+                                patient.currentPrescription?.medicationName &&
+                                patient.currentPrescription?.totalVolume > 0);
+
+    console.log(`🔍 [VALIDATE] ${patientId} 처방 데이터 검증:`, {
+      hasPrescription,
+      prescriptionValid,
+      medicationName: patient.currentPrescription?.medicationName
+    });
+
+    return prescriptionValid;
+  },
+
+  autoRecoverPrescription: async (patientId: string): Promise<boolean> => {
+    console.log(`🔧 [AUTO-RECOVER] ${patientId} 처방 정보 자동 복구 시작`);
+
+    try {
+      // 검증 먼저 수행
+      if (get().validatePrescriptionData(patientId)) {
+        console.log(`✅ [AUTO-RECOVER] ${patientId} 처방 정보 이미 유효함`);
+        return true;
+      }
+
+      // 강제 동기화 시도
+      await get().forcePrescriptionSync(patientId);
+
+      // 동기화 후 재검증
+      const isValid = get().validatePrescriptionData(patientId);
+      console.log(`${isValid ? '✅' : '❌'} [AUTO-RECOVER] ${patientId} 복구 ${isValid ? '성공' : '실패'}`);
+
+      return isValid;
+    } catch (error) {
+      console.error(`❌ [AUTO-RECOVER] ${patientId} 자동 복구 실패:`, error);
+      return false;
+    }
+  },
+
+  ensurePrescriptionConsistency: async (patientId: string): Promise<void> => {
+    console.log(`🔄 [CONSISTENCY] ${patientId} 처방 정보 일관성 보장 시작`);
+
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      const isValid = get().validatePrescriptionData(patientId);
+
+      if (isValid) {
+        console.log(`✅ [CONSISTENCY] ${patientId} 처방 정보 일관성 확인 완료`);
+        get().triggerPrescriptionCallbacks(patientId);
+        return;
+      }
+
+      attempts++;
+      console.log(`🔄 [CONSISTENCY] ${patientId} 복구 시도 ${attempts}/${maxAttempts}`);
+
+      const recovered = await get().autoRecoverPrescription(patientId);
+
+      if (recovered) {
+        console.log(`✅ [CONSISTENCY] ${patientId} 일관성 복구 성공`);
+        get().triggerPrescriptionCallbacks(patientId);
+        return;
+      }
+
+      // 잠시 대기 후 재시도
+      if (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+      }
+    }
+
+    console.warn(`⚠️ [CONSISTENCY] ${patientId} 처방 정보 일관성 보장 실패 (최대 시도 초과)`);
+  },
+
+  getPrescriptionStatus: (patientId: string): 'loading' | 'available' | 'missing' | 'error' => {
+    const patient = get().patients.find(p => p.id === patientId);
+
+    if (!patient) {
+      return 'error';
+    }
+
+    if (!patient.currentPrescription) {
+      return 'missing';
+    }
+
+    const isValid = get().validatePrescriptionData(patientId);
+    return isValid ? 'available' : 'error';
   }
 }));

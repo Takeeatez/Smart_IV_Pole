@@ -45,6 +45,23 @@ export interface IVSessionDB {
   totalVolumeMl: number;
 }
 
+export interface PrescriptionDB {
+  id?: number;
+  patientId: number;
+  drugTypeId: number;
+  totalVolumeMl: number;
+  infusionRateMlHr: number;
+  gttFactor: number;
+  calculatedGtt: number;
+  durationHours: number;
+  specialInstructions?: string;
+  status: 'PRESCRIBED' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  prescribedAt?: string;
+  prescribedBy: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
 export interface NurseDB {
   nurse_id?: number;
   name: string;
@@ -192,6 +209,67 @@ export const dripAPI = {
   // 수액 존재 여부 확인
   async dripExists(dripId: number): Promise<ApiResponse<boolean>> {
     return apiRequest<boolean>(`/drips/${dripId}/exists`);
+  },
+};
+
+// 처방 관련 API
+export const prescriptionAPI = {
+  // 모든 처방 조회
+  async getPrescriptions(): Promise<ApiResponse<PrescriptionDB[]>> {
+    return apiRequest<PrescriptionDB[]>('/prescriptions');
+  },
+
+  // 특정 환자의 처방 조회
+  async getPatientPrescriptions(patientId: number): Promise<ApiResponse<PrescriptionDB[]>> {
+    return apiRequest<PrescriptionDB[]>(`/prescriptions/patient/${patientId}`);
+  },
+
+  // 특정 환자의 활성 처방 조회
+  async getActivePatientPrescriptions(patientId: number): Promise<ApiResponse<PrescriptionDB[]>> {
+    return apiRequest<PrescriptionDB[]>(`/prescriptions/patient/${patientId}/active`);
+  },
+
+  // 처방 생성
+  async createPrescription(prescription: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'startedAt' | 'completedAt'>): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>('/prescriptions', {
+      method: 'POST',
+      body: JSON.stringify(prescription),
+    });
+  },
+
+  // 처방 시작
+  async startPrescription(prescriptionId: number): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>(`/prescriptions/${prescriptionId}/start`, {
+      method: 'PUT',
+    });
+  },
+
+  // 처방 일시정지
+  async pausePrescription(prescriptionId: number): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>(`/prescriptions/${prescriptionId}/pause`, {
+      method: 'PUT',
+    });
+  },
+
+  // 처방 재개
+  async resumePrescription(prescriptionId: number): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>(`/prescriptions/${prescriptionId}/resume`, {
+      method: 'PUT',
+    });
+  },
+
+  // 처방 완료
+  async completePrescription(prescriptionId: number): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>(`/prescriptions/${prescriptionId}/complete`, {
+      method: 'PUT',
+    });
+  },
+
+  // 처방 취소
+  async cancelPrescription(prescriptionId: number): Promise<ApiResponse<PrescriptionDB>> {
+    return apiRequest<PrescriptionDB>(`/prescriptions/${prescriptionId}/cancel`, {
+      method: 'PUT',
+    });
   },
 };
 

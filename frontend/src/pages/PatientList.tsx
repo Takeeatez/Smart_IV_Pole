@@ -24,14 +24,10 @@ const PatientList: React.FC = () => {
 
   const { patients, beds, removePatient, fetchPatients } = useWardStore();
 
-  // 페이지 진입 시 자동으로 환자 목록 새로고침
+  // ✅ RESTORED: 환자 데이터 자동 새로고침 (localStorage 처방 데이터는 wardStore에서 보존)
   useEffect(() => {
-    const loadPatients = async () => {
-      console.log('📋 환자 목록 페이지 - 데이터 새로고침');
-      await fetchPatients();
-    };
-    loadPatients();
-  }, []); // 컴포넌트 마운트 시 한 번만 실행
+    fetchPatients();
+  }, [fetchPatients]);
 
   // Get unique rooms and nurses for filter options
   const uniqueRooms = useMemo(() => {

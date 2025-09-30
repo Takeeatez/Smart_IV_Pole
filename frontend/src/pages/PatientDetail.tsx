@@ -1,53 +1,101 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Bell, Download, Droplet, Activity, Battery, Clock, AlertTriangle, Phone, Settings } from 'lucide-react';
+import { ArrowLeft, Bell, Download, Droplet, Activity, Battery, Clock, AlertTriangle, Phone, Settings, BarChart3, ClipboardList, User, Pill } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
 import { useMQTT } from '../hooks/useMQTT';
 import { calculateProgress, calculateRemainingTime, calculateEstimatedEndTime } from '../utils/gttCalculator';
 import PatientEditModal from '../components/patient/PatientEditModal';
+import DrugPrescriptionModal from '../components/patient/DrugPrescriptionModal';
 
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const {
-    getPatientById,
     beds,
     poleData,
     getActiveAlerts,
     getCriticalAlerts,
     fetchPatients,
-    patients
+    patients,
+    addIVPrescription,
+    updateIVPrescription,
+    registerPrescriptionCallback,
+    unregisterPrescriptionCallback,
+    forcePrescriptionSync
   } = useWardStore();
 
   const { isConnected } = useMQTT();
 
-  const [patient, setPatient] = useState<any>(undefined);
+  // Get patient data directly from patients array
+  const patient = patients.find(p => p.id === id);
   const patientBed = beds.find(bed => bed.patient?.id === id);
   const patientPoleData = patientBed?.poleData;
+
   const activeAlerts = getActiveAlerts().filter(alert => alert.patientId === id);
   const criticalAlerts = getCriticalAlerts().filter(alert => alert.patientId === id);
 
-  // 페이지 진입 시 환자 데이터 새로고침
-  useEffect(() => {
-    const loadPatientData = async () => {
-      console.log('👤 환자 상세 페이지 - 데이터 새로고침 (ID:', id, ')');
-      setIsLoading(true);
-      await fetchPatients();
-      setIsLoading(false);
-    };
-    loadPatientData();
-  }, [id]);
+  // Ref to prevent infinite calls
+  const isLoadingRef = useRef(false);
 
-  // 환자 데이터가 업데이트되면 patient 상태 업데이트
+  // Initial data loading function (no dependencies to prevent infinite loops)
+  const loadPatientData = useCallback(async () => {
+    if (!id || isLoadingRef.current) return;
+
+    isLoadingRef.current = true;
+    setIsLoading(true);
+    try {
+      await fetchPatients();
+    } catch (error) {
+      console.error('Failed to load patient data:', error);
+    } finally {
+      setIsLoading(false);
+      isLoadingRef.current = false;
+    }
+  }, [id]); // Only depend on id, not fetchPatients
+
+  // Individual patient prescription sync (no full reload)
+  const syncPatientPrescription = useCallback(async () => {
+    if (!id || isLoadingRef.current) return;
+
+    console.log(`🔄 [PATIENT-DETAIL] Individual prescription sync for ${id}`);
+    isLoadingRef.current = true;
+    try {
+      // Use individual patient prescription sync instead of full fetchPatients
+      await forcePrescriptionSync(id);
+    } catch (error) {
+      console.error('Failed to sync patient prescription:', error);
+    } finally {
+      isLoadingRef.current = false;
+    }
+  }, [id, forcePrescriptionSync]);
+
+  // Load patient data when component mounts or ID changes
   useEffect(() => {
-    const foundPatient = id ? getPatientById(id) : undefined;
-    console.log('🔍 환자 검색:', { id, foundPatient, patients });
-    setPatient(foundPatient);
-  }, [id, patients, getPatientById]);
+    loadPatientData();
+  }, [loadPatientData]);
+
+  // Register prescription callback for real-time updates
+  useEffect(() => {
+    if (id) {
+      // Register callback to sync individual patient prescription when changed
+      const callback = () => {
+        console.log(`📋 [PatientDetail] Prescription updated for patient ${id}, syncing...`);
+        syncPatientPrescription(); // Use individual patient sync instead of full refresh
+      };
+
+      registerPrescriptionCallback(id, callback);
+
+      // Cleanup: unregister callback on unmount or ID change
+      return () => {
+        unregisterPrescriptionCallback(id);
+      };
+    }
+  }, [id, registerPrescriptionCallback, unregisterPrescriptionCallback, syncPatientPrescription]);
 
   // Update current time every minute
   useEffect(() => {
@@ -87,10 +135,11 @@ const PatientDetail: React.FC = () => {
     );
   }
 
-  const prescription = patient.currentPrescription;
-  const progress = prescription ? calculateProgress(prescription.prescribedAt, prescription.duration, currentTime) : 0;
-  const remainingTime = prescription ? calculateRemainingTime(prescription.prescribedAt, prescription.duration, currentTime) : 0;
-  const estimatedEndTime = prescription ? calculateEstimatedEndTime(prescription.prescribedAt, prescription.duration) : null;
+  const prescription = patient?.currentPrescription;
+
+  const progress = (prescription && prescription.prescribedAt) ? calculateProgress(prescription.prescribedAt, prescription.duration, currentTime) : 0;
+  const remainingTime = (prescription && prescription.prescribedAt) ? calculateRemainingTime(prescription.prescribedAt, prescription.duration, currentTime) : 0;
+  const estimatedEndTime = (prescription && prescription.prescribedAt) ? calculateEstimatedEndTime(prescription.prescribedAt, prescription.duration) : null;
 
   const getStatusColor = () => {
     if (!patientPoleData || patientPoleData.status === 'offline') return 'text-gray-500';
@@ -128,25 +177,21 @@ const PatientDetail: React.FC = () => {
           <div className="px-4 space-y-2">
             <button
               onClick={() => navigate('/')}
-              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left"
+              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left transition-colors"
             >
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">📊</span>
-              </div>
+              <BarChart3 className="w-5 h-5" />
               <span>병동 전체</span>
             </button>
             <button
               onClick={() => navigate('/patients')}
-              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left"
+              className="w-full flex items-center gap-3 p-3 hover:bg-slate-700 rounded-lg cursor-pointer text-left transition-colors"
             >
-              <div className="w-5 h-5 flex items-center justify-center">
-                <span className="text-xs">📋</span>
-              </div>
+              <ClipboardList className="w-5 h-5" />
               <span>환자 목록</span>
             </button>
             <div className="flex items-center gap-3 p-3 bg-slate-700 rounded-lg">
               <div className="w-5 h-5 bg-blue-400 rounded-sm flex items-center justify-center">
-                <span className="text-xs">👤</span>
+                <User className="w-4 h-4 text-white" />
               </div>
               <span>환자 상세</span>
             </div>
@@ -328,9 +373,18 @@ const PatientDetail: React.FC = () => {
             )}
 
             {/* Prescription Details */}
-            {prescription && (
+            {prescription ? (
               <div className="bg-white p-6 rounded-xl shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">처방 정보</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">처방 정보</h3>
+                  <button
+                    onClick={() => setShowPrescriptionModal(true)}
+                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1.5 text-sm"
+                  >
+                    <Pill className="w-4 h-4" />
+                    처방 변경
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-6">
                   <div>
                     <div className="space-y-3">
@@ -374,6 +428,22 @@ const PatientDetail: React.FC = () => {
                   </div>
                 </div>
               </div>
+            ) : (
+              <div className="bg-white p-6 rounded-xl shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">처방 정보</h3>
+                </div>
+                <div className="text-center py-8">
+                  <p className="text-gray-600 mb-4">처방 정보가 없습니다.</p>
+                  <button
+                    onClick={() => setShowPrescriptionModal(true)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 mx-auto"
+                  >
+                    <Pill className="w-5 h-5" />
+                    처방 추가
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -401,7 +471,7 @@ const PatientDetail: React.FC = () => {
                 </div>
                 <div className="text-center">
                   <div className="flex items-center justify-center gap-1 mb-1">
-                    <span className="text-cyan-500">👤</span>
+                    <User className="w-4 h-4 text-cyan-500" />
                     <span className="text-sm text-gray-600">나이</span>
                   </div>
                   <div className="font-semibold">{patient.age}세</div>
@@ -409,7 +479,7 @@ const PatientDetail: React.FC = () => {
                 {patient.height && (
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 mb-1">
-                      <span className="text-cyan-500">📏</span>
+                      <div className="w-4 h-4 text-cyan-500">📏</div>
                       <span className="text-sm text-gray-600">키</span>
                     </div>
                     <div className="font-semibold">{patient.height} cm</div>
@@ -418,7 +488,7 @@ const PatientDetail: React.FC = () => {
                 {patient.weight && (
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 mb-1">
-                      <span className="text-cyan-500">⚖️</span>
+                      <div className="w-4 h-4 text-cyan-500">⚖</div>
                       <span className="text-sm text-gray-600">체중</span>
                     </div>
                     <div className="font-semibold">{patient.weight} kg</div>
@@ -454,6 +524,38 @@ const PatientDetail: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* 투여 이력 섹션 추가 */}
+            {patient.prescriptionHistory && patient.prescriptionHistory.length > 0 && (
+              <div className="bg-white p-6 rounded-xl shadow-sm">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">투여 이력</h3>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {patient.prescriptionHistory.map((prescription, index) => (
+                    <div key={prescription.id || index} className="border rounded-lg p-3 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium text-gray-900">{prescription.medicationName}</span>
+                        <span className="text-xs text-gray-500">
+                          {prescription.prescribedAt ? new Date(prescription.prescribedAt).toLocaleDateString('ko-KR') : '날짜 없음'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="flex items-center gap-1">
+                          <Droplet className="w-3 h-3 text-blue-500" />
+                          <span className="text-gray-600">용량: {prescription.totalVolume}mL</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-green-500" />
+                          <span className="text-gray-600">시간: {prescription.duration}분</span>
+                        </div>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        GTT: {prescription.calculatedGTT}/분 | 처방자: {prescription.prescribedBy}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Active Alerts */}
             <div className="bg-white p-6 rounded-xl shadow-sm">
@@ -518,6 +620,15 @@ const PatientDetail: React.FC = () => {
           patient={patient}
           isOpen={showEditModal}
           onClose={() => setShowEditModal(false)}
+        />
+      )}
+
+      {/* Drug Prescription Modal */}
+      {patient && (
+        <DrugPrescriptionModal
+          isOpen={showPrescriptionModal}
+          onClose={() => setShowPrescriptionModal(false)}
+          patient={patient}
         />
       )}
     </div>

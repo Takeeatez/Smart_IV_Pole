@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calculator, Pill, Clock, Loader } from 'lucide-react';
-import { Patient, IVPrescription, DripDB } from '../../types';
+import { X, Calculator, Pill, Clock } from 'lucide-react';
+import { Patient, IVPrescription } from '../../types';
 import { calculateGTT, calculateFlowRate, COMMON_DURATIONS } from '../../utils/gttCalculator';
 import { useWardStore } from '../../stores/wardStore';
-import { dripAPI } from '../../services/api';
 
 interface DrugPrescriptionModalProps {
   isOpen: boolean;
@@ -11,16 +10,31 @@ interface DrugPrescriptionModalProps {
   patient: Patient;
 }
 
+// 하드코딩된 약품 목록 (한국 병원 일반적인 IV 약품)
+const AVAILABLE_DRUGS = [
+  { dripId: 1, dripName: 'Normal Saline 0.9% 500mL' },
+  { dripId: 2, dripName: 'Normal Saline 0.9% 1000mL' },
+  { dripId: 3, dripName: '5% Dextrose 500mL' },
+  { dripId: 4, dripName: '5% Dextrose 1000mL' },
+  { dripId: 5, dripName: 'Hartmann Solution 500mL' },
+  { dripId: 6, dripName: 'Hartmann Solution 1000mL' },
+  { dripId: 7, dripName: 'Ringer Lactate 500mL' },
+  { dripId: 8, dripName: 'Ringer Lactate 1000mL' },
+  { dripId: 9, dripName: 'Mannitol 20% 250mL' },
+  { dripId: 10, dripName: 'Albumin 5% 250mL' },
+  { dripId: 11, dripName: 'Albumin 5% 500mL' },
+  { dripId: 12, dripName: 'Glucose 50% 50mL' },
+  { dripId: 13, dripName: 'Sodium Bicarbonate 8.4% 20mL' },
+  { dripId: 14, dripName: 'Potassium Chloride 15mEq/10mL' },
+  { dripId: 15, dripName: 'Calcium Gluconate 10% 10mL' }
+];
+
 const DrugPrescriptionModal: React.FC<DrugPrescriptionModalProps> = ({
   isOpen,
   onClose,
   patient
 }) => {
-  const { addIVPrescription, fetchPatients } = useWardStore();
-
-  // Available drug types from backend
-  const [availableDrugs, setAvailableDrugs] = useState<DripDB[]>([]);
-  const [loadingDrugs, setLoadingDrugs] = useState(false);
+  const { addIVPrescription } = useWardStore();
 
   // IV Prescription form state
   const [prescriptionForm, setPrescriptionForm] = useState({
@@ -38,29 +52,10 @@ const DrugPrescriptionModal: React.FC<DrugPrescriptionModalProps> = ({
     flowRate: 0
   });
 
-  // Load available drug types from backend
+  // 프론트엔드 전용 약품 목록 로그 (백엔드 의존성 제거)
   useEffect(() => {
-    const loadDrugTypes = async () => {
-      setLoadingDrugs(true);
-      try {
-        const response = await dripAPI.getDrips();
-        if (response.success && response.data) {
-          setAvailableDrugs(response.data);
-        } else {
-          console.error('Failed to load drug types:', response.error);
-          // Fallback to empty array if backend is not available
-          setAvailableDrugs([]);
-        }
-      } catch (error) {
-        console.error('Error loading drug types:', error);
-        setAvailableDrugs([]);
-      } finally {
-        setLoadingDrugs(false);
-      }
-    };
-
     if (isOpen) {
-      loadDrugTypes();
+      console.log('💊 [MODAL-FRONTEND] 하드코딩된 약품 목록 사용:', AVAILABLE_DRUGS.length, '개');
     }
   }, [isOpen]);
 
@@ -122,13 +117,8 @@ const DrugPrescriptionModal: React.FC<DrugPrescriptionModalProps> = ({
       prescribedAt: new Date()
     };
 
-    // Add prescription to patient
-    addIVPrescription(patient.id, prescription);
-
-    // Refresh patient data
-    setTimeout(() => {
-      fetchPatients();
-    }, 1000);
+    // Add prescription to patient (now async with immediate UI update)
+    await addIVPrescription(patient.id, prescription);
 
     // Close modal and reset form
     handleClose();
@@ -203,31 +193,19 @@ const DrugPrescriptionModal: React.FC<DrugPrescriptionModalProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 약품명 *
               </label>
-              {loadingDrugs ? (
-                <div className="flex items-center gap-2 p-3 border border-gray-300 rounded-lg">
-                  <Loader className="w-4 h-4 animate-spin" />
-                  <span className="text-gray-500">약품 목록을 불러오는 중...</span>
-                </div>
-              ) : (
-                <select
-                  value={prescriptionForm.medicationName}
-                  onChange={(e) => setPrescriptionForm(prev => ({ ...prev, medicationName: e.target.value }))}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                  required
-                >
-                  <option value="">약품 선택</option>
-                  {availableDrugs.map((drug) => (
-                    <option key={drug.dripId} value={drug.dripName}>
-                      {drug.dripName}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {!loadingDrugs && availableDrugs.length === 0 && (
-                <p className="mt-2 text-sm text-amber-600">
-                  ⚠️ 백엔드 서버에서 약품 목록을 불러올 수 없습니다.
-                </p>
-              )}
+              <select
+                value={prescriptionForm.medicationName}
+                onChange={(e) => setPrescriptionForm(prev => ({ ...prev, medicationName: e.target.value }))}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                required
+              >
+                <option value="">약품 선택</option>
+                {AVAILABLE_DRUGS.map((drug) => (
+                  <option key={drug.dripId} value={drug.dripName}>
+                    {drug.dripName}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

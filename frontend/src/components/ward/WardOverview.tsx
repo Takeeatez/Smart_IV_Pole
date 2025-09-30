@@ -40,13 +40,9 @@ const WardOverview: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // 페이지 진입 시 항상 최신 환자 데이터 로드
+  // ✅ RESTORED: 환자 데이터 자동 새로고침 (localStorage 처방 데이터는 wardStore에서 보존)
   useEffect(() => {
-    const loadPatients = async () => {
-      console.log('🏥 병동 현황 페이지 - 데이터 새로고침');
-      await fetchPatients();
-    };
-    loadPatients();
+    fetchPatients();
   }, [fetchPatients]);
 
   const activeAlerts = getActiveAlerts();

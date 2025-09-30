@@ -1,5 +1,6 @@
 // localStorage 관리 서비스 - 데이터 영속성 제공
-import { Patient, BedInfo, Alert, PoleData } from '../types';
+import { Patient, BedInfo, Alert, PoleData, IVPrescription } from '../types';
+import { DripDB } from '../services/api';
 
 const STORAGE_KEYS = {
   PATIENTS: 'smart_iv_pole_patients',
@@ -7,6 +8,8 @@ const STORAGE_KEYS = {
   ALERTS: 'smart_iv_pole_alerts',
   POLE_DATA: 'smart_iv_pole_pole_data',
   PATIENT_BED_MAPPING: 'smart_iv_pole_patient_bed_mapping',
+  DRUG_TYPES: 'smart_iv_pole_drug_types',
+  PRESCRIPTIONS: 'smart_iv_pole_prescriptions',
   VERSION: 'smart_iv_pole_version'
 } as const;
 
@@ -152,6 +155,80 @@ class StorageService {
     console.log('✅ Patient bed mapping saved to localStorage');
   }
 
+  // 약품 타입 저장/로드
+  saveDrugTypes(drugTypes: DripDB[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DRUG_TYPES, JSON.stringify(drugTypes));
+      console.log('💊 Drug types saved to localStorage:', drugTypes.length, 'items');
+    } catch (error) {
+      console.error('Failed to save drug types:', error);
+    }
+  }
+
+  loadDrugTypes(): DripDB[] | null {
+    this.checkVersion();
+    const stored = localStorage.getItem(STORAGE_KEYS.DRUG_TYPES);
+    if (!stored) return null;
+
+    try {
+      const drugTypes = JSON.parse(stored) as DripDB[];
+      console.log('💊 Loaded drug types from localStorage:', drugTypes.length, 'items');
+      return drugTypes;
+    } catch (error) {
+      console.error('Failed to load drug types from storage:', error);
+      return null;
+    }
+  }
+
+  // 처방 정보 별도 저장/로드 (약품 정보 포함)
+  savePrescriptions(prescriptions: Map<string, IVPrescription>): void {
+    try {
+      const prescriptionsArray = Array.from(prescriptions.entries());
+      localStorage.setItem(STORAGE_KEYS.PRESCRIPTIONS, JSON.stringify(prescriptionsArray));
+      console.log('💊 [PRESCRIPTIONS] localStorage에 처방 정보 저장:', prescriptionsArray.length, '개');
+    } catch (error) {
+      console.error('Failed to save prescriptions:', error);
+    }
+  }
+
+  loadPrescriptions(): Map<string, IVPrescription> | null {
+    this.checkVersion();
+    const stored = localStorage.getItem(STORAGE_KEYS.PRESCRIPTIONS);
+    if (!stored) return null;
+
+    try {
+      const prescriptionsArray = JSON.parse(stored) as [string, IVPrescription][];
+      const prescriptionsMap = new Map<string, IVPrescription>();
+
+      prescriptionsArray.forEach(([patientId, prescription]) => {
+        // 날짜 객체 복원
+        const restoredPrescription = {
+          ...prescription,
+          prescribedAt: new Date(prescription.prescribedAt)
+        };
+        prescriptionsMap.set(patientId, restoredPrescription);
+      });
+
+      console.log('💊 [PRESCRIPTIONS] localStorage에서 처방 정보 로드:', prescriptionsArray.length, '개');
+      return prescriptionsMap;
+    } catch (error) {
+      console.error('Failed to load prescriptions from storage:', error);
+      return null;
+    }
+  }
+
+  // 개별 환자 처방 저장
+  savePrescriptionForPatient(patientId: string, prescription: IVPrescription): void {
+    try {
+      const existingPrescriptions = this.loadPrescriptions() || new Map();
+      existingPrescriptions.set(patientId, prescription);
+      this.savePrescriptions(existingPrescriptions);
+      console.log(`💊 [PRESCRIPTION-SAVE] ${patientId} 처방 정보 저장: ${prescription.medicationName}`);
+    } catch (error) {
+      console.error('Failed to save prescription for patient:', error);
+    }
+  }
+
   loadPatientBedMapping(): Map<string, string> | null {
     this.checkVersion();
     const stored = localStorage.getItem(STORAGE_KEYS.PATIENT_BED_MAPPING);
@@ -181,6 +258,15 @@ class StorageService {
       this.saveAlerts(alerts);
       this.savePoleData(poleData);
       this.savePatientBedMapping(patientBedMapping);
+
+      // 처방 정보도 별도로 저장
+      const prescriptions = new Map<string, IVPrescription>();
+      patients.forEach(patient => {
+        if (patient.currentPrescription) {
+          prescriptions.set(patient.id, patient.currentPrescription);
+        }
+      });
+      this.savePrescriptions(prescriptions);
     } catch (error) {
       console.error('Failed to save ward state:', error);
     }
