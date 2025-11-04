@@ -21,7 +21,8 @@ const WardOverview: React.FC = () => {
     setSelectedPatient,
     getActiveAlerts,
     getCriticalAlerts,
-    fetchPatients
+    fetchPatients,
+    fetchAlerts
   } = useWardStore();
 
   const { isConnected, connectionStatus } = useMQTT();
@@ -44,6 +45,19 @@ const WardOverview: React.FC = () => {
   useEffect(() => {
     fetchPatients();
   }, [fetchPatients]);
+
+  // 🔔 실시간 알림 폴링 (5초마다 자동 새로고침)
+  useEffect(() => {
+    // 초기 알림 로드
+    fetchAlerts();
+
+    // 5초마다 알림 폴링
+    const alertPollingInterval = setInterval(() => {
+      fetchAlerts();
+    }, 5000);
+
+    return () => clearInterval(alertPollingInterval);
+  }, [fetchAlerts]);
 
   const activeAlerts = getActiveAlerts();
   const criticalAlerts = getCriticalAlerts();

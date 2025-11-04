@@ -58,6 +58,9 @@ public class Patient {
     @Column(name = "assigned_pole_id", length = 20)
     private String assignedPoleId; // 할당된 폴대 ID (optional bidirectional reference)
 
+    @Column(name = "pin_code", length = 6)
+    private String pinCode; // 환자 모바일 앱 로그인용 6자리 PIN
+
     // Bidirectional relationship with Pole
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assigned_pole_id", insertable = false, updatable = false)

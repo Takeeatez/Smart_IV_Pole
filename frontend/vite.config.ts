@@ -15,4 +15,8 @@ export default defineConfig({
       },
     },
   },
+  define: {
+    // Fix SockJS "global is not defined" error
+    global: 'globalThis',
+  },
 })

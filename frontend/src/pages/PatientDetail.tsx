@@ -138,7 +138,9 @@ const PatientDetail: React.FC = () => {
   const prescription = patient?.currentPrescription;
 
   // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
-  const startTime = prescription?.startedAt || prescription?.prescribedAt;
+  // API나 localStorage에서 가져온 데이터는 문자열일 수 있으므로 Date 객체로 변환
+  const rawStartTime = prescription?.startedAt || prescription?.prescribedAt;
+  const startTime = rawStartTime ? (rawStartTime instanceof Date ? rawStartTime : new Date(rawStartTime)) : null;
   const progress = (prescription && startTime) ? calculateProgress(startTime, prescription.duration, currentTime) : 0;
   const remainingTime = (prescription && startTime) ? calculateRemainingTime(startTime, prescription.duration, currentTime) : 0;
   const estimatedEndTime = (prescription && startTime) ? calculateEstimatedEndTime(startTime, prescription.duration) : null;

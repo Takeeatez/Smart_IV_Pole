@@ -1,5 +1,6 @@
 package com.example.smartpole.controller;
 
+import com.example.smartpole.dto.ApiResponse;
 import com.example.smartpole.entity.DrugType;
 import com.example.smartpole.service.DrugTypeService;
 import lombok.RequiredArgsConstructor;
@@ -27,13 +28,13 @@ public class DrugTypeController {
     /**
      * 전체 약품 목록 조회
      * GET /api/v1/drips
-     * @return 모든 DrugType 리스트
+     * @return 모든 DrugType 리스트 (ApiResponse 래퍼)
      */
     @GetMapping
-    public ResponseEntity<List<DrugType>> getAllDrugTypes() {
+    public ResponseEntity<ApiResponse<List<DrugType>>> getAllDrugTypes() {
         // 모든 약품 유형을 조회하여 반환
         List<DrugType> drugTypeEntities = drugTypeService.getAllDrugTypes();
-        return ResponseEntity.ok(drugTypeEntities);
+        return ResponseEntity.ok(ApiResponse.success(drugTypeEntities));
     }
 
     /**

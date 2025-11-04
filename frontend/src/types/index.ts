@@ -27,6 +27,7 @@ export interface Patient {
   id: string;
   name: string;
   phone?: string; // 전화번호 추가 (선택적)
+  pinCode?: string; // 모바일 앱 로그인용 6자리 PIN (선택적)
   room: string;
   bed: string;
   nurseId: string;

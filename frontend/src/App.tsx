@@ -7,13 +7,23 @@ import Statistics from './pages/Statistics'
 import Settings from './pages/Settings'
 import DeviceManagement from './pages/DeviceManagement'
 import { useWardStore } from './stores/wardStore'
-import { useMQTT } from './hooks/useMQTT'
+import { useWebSocket } from './hooks/useWebSocket'
 
 function App() {
   const { checkConnection, loadStoredData, initializeMockData } = useWardStore()
   const [isInitialized, setIsInitialized] = useState(false)
-  
-  useMQTT() // Initialize MQTT connection (currently mock)
+
+  // Real-time WebSocket connection for ESP8266 hardware integration
+  const { isConnected, connectionStatus, error } = useWebSocket({
+    serverUrl: 'http://localhost:8081',
+    reconnectDelay: 5000,
+    debug: true // Enable debug logging
+  })
+
+  // Log WebSocket status
+  useEffect(() => {
+    console.log('📡 WebSocket Status:', { isConnected, connectionStatus, error })
+  }, [isConnected, connectionStatus, error])
 
   useEffect(() => {
     const initializeApp = async () => {

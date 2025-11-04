@@ -16,6 +16,7 @@ export interface PatientDB {
   patientId?: number;
   name: string;
   phone: string; // 필수 필드 추가
+  pinCode?: string; // 모바일 앱 로그인용 6자리 PIN
   birthDate: string; // DB에서 birth_date 필드 사용
   gender: 'male' | 'female';
   weightKg?: number; // DB에서 weight_kg 필드 사용
@@ -229,8 +230,8 @@ export const prescriptionAPI = {
     return apiRequest<PrescriptionDB[]>(`/prescriptions/patient/${patientId}/active`);
   },
 
-  // 처방 생성 (startedAt은 프론트엔드에서 보내므로 타입에 포함)
-  async createPrescription(prescription: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt'>): Promise<ApiResponse<PrescriptionDB>> {
+  // 처방 생성 (startedAt은 백엔드에서 자동 처리)
+  async createPrescription(prescription: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt' | 'startedAt'>): Promise<ApiResponse<PrescriptionDB>> {
     return apiRequest<PrescriptionDB>('/prescriptions', {
       method: 'POST',
       body: JSON.stringify(prescription),

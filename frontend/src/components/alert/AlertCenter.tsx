@@ -18,6 +18,7 @@ const AlertCenter: React.FC<AlertCenterProps> = ({ isOpen, onClose }) => {
     getActiveAlerts,
     getCriticalAlerts,
     acknowledgeAlert,
+    acknowledgeAlertBackend,
     removeAlert,
     getPatientById
   } = useWardStore();
@@ -91,9 +92,9 @@ const AlertCenter: React.FC<AlertCenterProps> = ({ isOpen, onClose }) => {
     });
   }, [alerts, soundEnabled, getCriticalAlerts, playAlertSound]);
 
-  // 알림 확인 처리
+  // 알림 확인 처리 (Backend 연동)
   const handleAcknowledge = (alertId: string) => {
-    acknowledgeAlert(alertId, 'NURSE001'); // TODO: 실제 간호사 ID 사용
+    acknowledgeAlertBackend(alertId, 'NURSE001'); // Backend API 호출 후 로컬 업데이트
   };
 
   // 알림 삭제
@@ -116,8 +117,8 @@ const AlertCenter: React.FC<AlertCenterProps> = ({ isOpen, onClose }) => {
         return <Droplet className="w-5 h-5" />;
       case 'battery_low':
         return <Battery className="w-5 h-5" />;
-      case 'button_pressed':
-        return <Phone className="w-5 h-5" />;
+      case 'button_pressed': // 간호사 호출 (nurse_call)
+        return <Bell className="w-5 h-5 animate-pulse" />; // 벨 아이콘 + 애니메이션
       case 'offline':
         return <WifiOff className="w-5 h-5" />;
       case 'abnormal':

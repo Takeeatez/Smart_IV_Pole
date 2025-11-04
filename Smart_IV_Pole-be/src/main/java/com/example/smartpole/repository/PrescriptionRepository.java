@@ -53,4 +53,9 @@ public interface PrescriptionRepository extends JpaRepository<Prescription, Inte
     @Query("SELECT p FROM Prescription p WHERE p.prescribedAt >= :since " +
            "ORDER BY p.prescribedAt DESC")
     List<Prescription> findRecentPrescriptions(@Param("since") LocalDateTime since);
+
+    // Find latest prescription by patient (for mobile app)
+    @Query("SELECT p FROM Prescription p WHERE p.patientId = :patientId " +
+           "ORDER BY p.prescribedAt DESC LIMIT 1")
+    Optional<Prescription> findLatestByPatientId(@Param("patientId") Integer patientId);
 }

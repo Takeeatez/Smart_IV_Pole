@@ -22,6 +22,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
   const [patientForm, setPatientForm] = useState({
     name: '',
     phone: '',
+    pinCode: '', // 모바일 앱 로그인용 6자리 PIN
     age: '',
     gender: 'female' as 'male' | 'female',
     weight: '',
@@ -41,6 +42,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
       setPatientForm({
         name: patient.name,
         phone: patient.phone || '',
+        pinCode: '', // 수정 시에는 PIN 재입력 (보안상 표시하지 않음)
         age: patient.age.toString(),
         gender: patient.gender,
         weight: patient.weight?.toString() || '',
@@ -113,6 +115,7 @@ const PatientModal: React.FC<PatientModalProps> = ({
     setPatientForm({
       name: '',
       phone: '',
+      pinCode: '',
       age: '',
       gender: 'female',
       weight: '',
@@ -121,6 +124,12 @@ const PatientModal: React.FC<PatientModalProps> = ({
       nurseId: 'N001',
       nurseName: '김수연'
     });
+  };
+
+  // 랜덤 6자리 PIN 생성
+  const generateRandomPIN = () => {
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    setPatientForm(prev => ({ ...prev, pinCode: pin }));
   };
 
   const handleClose = () => {
@@ -217,6 +226,38 @@ const PatientModal: React.FC<PatientModalProps> = ({
                     placeholder="010-0000-0000"
                   />
                 </div>
+              </div>
+
+              {/* PIN 번호 입력 (모바일 앱 로그인용) */}
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  모바일 앱 로그인 PIN (6자리) *
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    pattern="[0-9]{6}"
+                    value={patientForm.pinCode}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, ''); // 숫자만 허용
+                      setPatientForm(prev => ({ ...prev, pinCode: value }));
+                    }}
+                    className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center text-lg font-mono"
+                    placeholder="123456"
+                  />
+                  <button
+                    type="button"
+                    onClick={generateRandomPIN}
+                    className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    자동 생성
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-600">
+                  ℹ️ 환자가 모바일 앱에서 로그인할 때 사용하는 PIN 번호입니다
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

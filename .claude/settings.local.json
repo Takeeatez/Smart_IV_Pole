@@ -24,7 +24,9 @@
       "Bash(xargs kill:*)",
       "Bash(python3:*)",
       "Read(//Users/ayaan/Git/**)",
-      "Bash(npx tailwindcss:*)"
+      "Bash(npx tailwindcss:*)",
+      "Bash(flutter create:*)",
+      "Bash(flutter pub add:*)"
     ],
     "deny": [],
     "ask": []
