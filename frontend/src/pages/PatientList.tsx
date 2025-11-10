@@ -399,7 +399,8 @@ const PatientList: React.FC = () => {
                     const poleData = getPatientPoleData(patient.id);
                     const prescription = patient.currentPrescription;
                     // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
-                    const startTime = prescription?.startedAt || prescription?.prescribedAt;
+                    const startTimeRaw = prescription?.startedAt || prescription?.prescribedAt;
+                    const startTime = startTimeRaw ? new Date(startTimeRaw) : null;
                     const progress = (prescription && startTime) ? calculateProgress(startTime, prescription.duration) : 0;
                     const remainingTime = (prescription && startTime) ? calculateRemainingTime(startTime, prescription.duration) : 0;
 
