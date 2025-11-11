@@ -440,29 +440,20 @@ const DEFAULT_DRUGS = [
 // 백엔드 DB에 기본 약품 목록 초기화 (서버 재시작 시 자동 호출)
 export const initializeDefaultDrugs = async (): Promise<void> => {
   try {
-    console.log('💊 [INIT] 약품 목록 초기화 시작...');
-
-    // 기존 약품 목록 확인
     const existingDrugsResponse = await dripAPI.getDrips();
     const existingDrugs = existingDrugsResponse.success ? existingDrugsResponse.data || [] : [];
 
     if (existingDrugs.length > 0) {
-      console.log('💊 [INIT] 이미 약품이 존재합니다:', existingDrugs.length, '개');
       return;
     }
 
-    // 기본 약품 목록 등록
-    console.log('💊 [INIT] 기본 약품 목록 등록 중...', DEFAULT_DRUGS.length, '개');
     const promises = DEFAULT_DRUGS.map(drugName =>
       dripAPI.createDrip({ dripName: drugName })
     );
 
-    const results = await Promise.all(promises);
-    const successCount = results.filter(r => r.success).length;
-
-    console.log(`✅ [INIT] 약품 초기화 완료: ${successCount}/${DEFAULT_DRUGS.length}개 등록됨`);
+    await Promise.all(promises);
   } catch (error) {
-    console.error('❌ [INIT] 약품 초기화 실패:', error);
+    console.error('[INIT] Drug initialization failed:', error);
   }
 };
 

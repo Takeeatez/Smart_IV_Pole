@@ -19,6 +19,12 @@ public interface PoleRepository extends JpaRepository<Pole, String> {
     // Find active poles
     List<Pole> findByStatusOrderByPoleIdAsc(Pole.PoleStatus status);
 
+    // Find online poles
+    List<Pole> findByIsOnlineOrderByPoleIdAsc(Boolean isOnline);
+
+    // Find available online poles (online + not assigned)
+    List<Pole> findByIsOnlineAndPatientIdIsNullOrderByPoleIdAsc(Boolean isOnline);
+
     // Find poles with low battery
     @Query("SELECT p FROM Pole p WHERE p.batteryLevel <= :threshold ORDER BY p.batteryLevel ASC")
     List<Pole> findLowBatteryPoles(@Param("threshold") Integer threshold);

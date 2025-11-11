@@ -256,9 +256,9 @@ curl -X POST http://localhost:8081/api/v1/drips \
 
 ### Direct Database Access
 ```bash
-# Connect to MariaDB server
+# Connect to MariaDB server (credentials in Smart_IV_Pole-be/.env)
 mysql -h 61.245.248.193 -P 3308 -u yizy --skip-ssl -p
-# Password: smartpole*
+# Password: (see Smart_IV_Pole-be/.env file)
 
 # Once connected, use the database
 USE smartpole;

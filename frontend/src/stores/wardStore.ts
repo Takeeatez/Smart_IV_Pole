@@ -64,6 +64,10 @@ interface WardStore {
   autoRecoverPrescription: (patientId: string) => Promise<boolean>;
   ensurePrescriptionConsistency: (patientId: string) => Promise<void>;
   getPrescriptionStatus: (patientId: string) => 'loading' | 'available' | 'missing' | 'error';
+
+  // 🔌 NEW: Pole connection management
+  connectPoleToPatient: (patientId: string, poleId: string) => Promise<void>;
+  disconnectPoleFromPatient: (patientId: string) => Promise<void>;
 }
 
 // Helper function to determine status color based on pole data
@@ -1490,6 +1494,123 @@ export const useWardStore = create<WardStore>((set, get) => ({
       console.error('❌ [acknowledgeAlert] Error acknowledging alert:', error);
       // Fallback to local state update
       get().acknowledgeAlert(alertId, nurseId);
+    }
+  },
+
+  /**
+   * Connect pole to patient
+   */
+  connectPoleToPatient: async (patientId: string, poleId: string) => {
+    const { isServerConnected, patients } = get();
+
+    if (!isServerConnected) {
+      throw new Error('서버에 연결되어 있지 않습니다');
+    }
+
+    try {
+      console.log(`🔌 [connectPole] Connecting pole ${poleId} to patient ${patientId}`);
+
+      // Extract numeric patient ID from string (P123 -> 123)
+      const numericPatientId = patientId.replace('P', '');
+
+      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/connect?patientId=${numericPatientId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ [connectPole] Successfully connected pole ${poleId} to patient ${patientId}`);
+
+        // Update local state - find patient and update poleId
+        const updatedPatients = patients.map(patient => {
+          if (patient.id === patientId) {
+            return { ...patient, poleId };
+          }
+          return patient;
+        });
+
+        set({ patients: updatedPatients });
+
+        // 처방 정보가 있으면 ESP8266으로 전송 (백엔드가 자동 처리)
+        const patient = patients.find(p => p.id === patientId);
+        if (patient?.currentPrescription) {
+          console.log(`📤 [connectPole] Prescription data will be sent to ESP8266 via backend`);
+        }
+
+        // Refresh patients data to sync with backend
+        await get().fetchPatients();
+
+        // Save to storage
+        get().saveToStorage();
+      } else {
+        const error = await response.text();
+        console.error('❌ [connectPole] Failed to connect pole:', error);
+        throw new Error(`폴대 연결 실패: ${error}`);
+      }
+    } catch (error) {
+      console.error('❌ [connectPole] Error connecting pole:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Disconnect pole from patient
+   */
+  disconnectPoleFromPatient: async (patientId: string) => {
+    const { isServerConnected, patients } = get();
+
+    if (!isServerConnected) {
+      throw new Error('서버에 연결되어 있지 않습니다');
+    }
+
+    try {
+      console.log(`🔌 [disconnectPole] Disconnecting pole from patient ${patientId}`);
+
+      // Find patient's current pole
+      const patient = patients.find(p => p.id === patientId);
+      if (!patient?.poleId) {
+        console.warn(`⚠️ [disconnectPole] Patient ${patientId} has no connected pole`);
+        return;
+      }
+
+      const poleId = patient.poleId;
+
+      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/disconnect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ [disconnectPole] Successfully disconnected pole ${poleId} from patient ${patientId}`);
+
+        // Update local state - remove poleId from patient
+        const updatedPatients = patients.map(p => {
+          if (p.id === patientId) {
+            const { poleId, ...rest } = p;
+            return rest;
+          }
+          return p;
+        });
+
+        set({ patients: updatedPatients });
+
+        // Refresh patients data to sync with backend
+        await get().fetchPatients();
+
+        // Save to storage
+        get().saveToStorage();
+      } else {
+        const error = await response.text();
+        console.error('❌ [disconnectPole] Failed to disconnect pole:', error);
+        throw new Error(`폴대 연결 해제 실패: ${error}`);
+      }
+    } catch (error) {
+      console.error('❌ [disconnectPole] Error disconnecting pole:', error);
+      throw error;
     }
   },
 }));

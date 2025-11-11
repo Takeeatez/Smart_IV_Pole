@@ -3,9 +3,9 @@ spring:
     name: SmartPole
 
   datasource:
-    url: jdbc:mariadb://61.245.248.193:3308/smartpole
-    username: yizy
-    password: smartpole*
+    url: ${DB_URL:jdbc:mariadb://localhost:3306/smartpole}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.mariadb.jdbc.Driver
 
   jpa:
@@ -15,11 +15,10 @@ spring:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
         show_sql: false
     show-sql: false
 
-  # Connection Pool (HikariCP)
   hikari:
     connection-timeout: 30000
     idle-timeout: 600000
@@ -28,16 +27,15 @@ spring:
     minimum-idle: 2
 
 server:
-  port: 8081
+  port: ${SERVER_PORT:8081}
 
-# MQTT Configuration
 mqtt:
   broker:
-    url: tcp://localhost:1883
+    url: ${MQTT_BROKER_URL:tcp://localhost:1883}
   client:
-    id: smart-iv-backend
-  username: ""
-  password: ""
+    id: ${MQTT_CLIENT_ID:smart-iv-backend}
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
   topics:
     telemetry: hospital/pole/+/telemetry
     alerts: hospital/alert/#
@@ -48,10 +46,9 @@ mqtt:
     default: 1
     critical: 2
 
-# Logging
 logging:
   level:
-    com.example.smartpole: INFO
+    com.example.smartpole: ${LOG_LEVEL:INFO}
     org.hibernate.SQL: ERROR
     org.hibernate.type.descriptor.sql.BasicBinder: ERROR
     org.springframework.integration.mqtt: INFO

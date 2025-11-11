@@ -1,0 +1,9 @@
+// WiFi Configuration
+// Copy this file to config.h and fill in your credentials
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+
+// Server Configuration
+const char* serverHost = "192.168.1.100";  // Your server IP or domain
+const uint16_t serverPort = 8081;
+const char* serverPath = "/api/esp/data";

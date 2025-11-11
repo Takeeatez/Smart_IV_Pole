@@ -43,6 +43,12 @@ public class Pole {
     @Column(name = "assigned_at")
     private LocalDateTime assignedAt; // 폴대 할당 시간
 
+    @Column(name = "last_ping_at")
+    private LocalDateTime lastPingAt; // 마지막 핑 시간
+
+    @Column(name = "is_online", nullable = false)
+    private Boolean isOnline = false; // 온라인 상태 (30초 이내 핑 = true)
+
     // Bidirectional relationship with Patient
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id", insertable = false, updatable = false)
@@ -71,6 +77,24 @@ public class Pole {
     public void unassign() {
         this.patientId = null;
         this.assignedAt = null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    // Ping management methods
+    public void updatePing() {
+        this.lastPingAt = LocalDateTime.now();
+        this.isOnline = true;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isOnlineNow() {
+        if (lastPingAt == null) return false;
+        // 60초 이내 핑이 있으면 온라인
+        return LocalDateTime.now().minusSeconds(60).isBefore(lastPingAt);
+    }
+
+    public void markOffline() {
+        this.isOnline = false;
         this.updatedAt = LocalDateTime.now();
     }
 }

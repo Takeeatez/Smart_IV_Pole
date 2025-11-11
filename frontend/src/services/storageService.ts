@@ -150,16 +150,13 @@ class StorageService {
   // 환자-침대 매핑 저장/로드
   savePatientBedMapping(mappingMap: Map<string, string>): void {
     const mappingArray = Array.from(mappingMap.entries());
-    console.log('💾 Saving patient bed mapping:', mappingArray);
     localStorage.setItem(STORAGE_KEYS.PATIENT_BED_MAPPING, JSON.stringify(mappingArray));
-    console.log('✅ Patient bed mapping saved to localStorage');
   }
 
   // 약품 타입 저장/로드
   saveDrugTypes(drugTypes: DripDB[]): void {
     try {
       localStorage.setItem(STORAGE_KEYS.DRUG_TYPES, JSON.stringify(drugTypes));
-      console.log('💊 Drug types saved to localStorage:', drugTypes.length, 'items');
     } catch (error) {
       console.error('Failed to save drug types:', error);
     }
@@ -172,7 +169,6 @@ class StorageService {
 
     try {
       const drugTypes = JSON.parse(stored) as DripDB[];
-      console.log('💊 Loaded drug types from localStorage:', drugTypes.length, 'items');
       return drugTypes;
     } catch (error) {
       console.error('Failed to load drug types from storage:', error);
@@ -185,7 +181,6 @@ class StorageService {
     try {
       const prescriptionsArray = Array.from(prescriptions.entries());
       localStorage.setItem(STORAGE_KEYS.PRESCRIPTIONS, JSON.stringify(prescriptionsArray));
-      console.log('💊 [PRESCRIPTIONS] localStorage에 처방 정보 저장:', prescriptionsArray.length, '개');
     } catch (error) {
       console.error('Failed to save prescriptions:', error);
     }
@@ -209,7 +204,6 @@ class StorageService {
         prescriptionsMap.set(patientId, restoredPrescription);
       });
 
-      console.log('💊 [PRESCRIPTIONS] localStorage에서 처방 정보 로드:', prescriptionsArray.length, '개');
       return prescriptionsMap;
     } catch (error) {
       console.error('Failed to load prescriptions from storage:', error);
@@ -223,7 +217,6 @@ class StorageService {
       const existingPrescriptions = this.loadPrescriptions() || new Map();
       existingPrescriptions.set(patientId, prescription);
       this.savePrescriptions(existingPrescriptions);
-      console.log(`💊 [PRESCRIPTION-SAVE] ${patientId} 처방 정보 저장: ${prescription.medicationName}`);
     } catch (error) {
       console.error('Failed to save prescription for patient:', error);
     }
@@ -242,7 +235,6 @@ class StorageService {
         mappingMap.set(patientId, bedNumber);
       });
 
-      console.log('🗺️ Loaded patient bed mapping:', Array.from(mappingMap.entries()));
       return mappingMap;
     } catch (error) {
       console.error('Failed to load patient bed mapping from storage:', error);

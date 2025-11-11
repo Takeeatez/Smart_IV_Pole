@@ -21,6 +21,13 @@ backend/mvnw.cmd
 backend/logs/
 backend/*.log
 
+# Backend configuration with credentials
+Smart_IV_Pole-be/src/main/resources/application.yml
+Smart_IV_Pole-be/src/main/resources/application.properties
+Smart_IV_Pole-be/build/
+Smart_IV_Pole-be/.gradle/
+Smart_IV_Pole-be/out/
+
 # Frontend (React)
 frontend/node_modules/
 frontend/dist/
@@ -60,6 +67,8 @@ mobile/*.lock
 # Hardware (ESP32)
 hardware/.pio/
 hardware/.vscode/
+hardware/config.h
+hardware/*_config.h
 
 # Database
 database/backup/*.sql
