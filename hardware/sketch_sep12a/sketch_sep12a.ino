@@ -23,9 +23,11 @@ const float LOW_VOLUME_THRESHOLD = 10.0;  // 잔여량 10% 미만 시 전송
 const unsigned long MIN_SEND_INTERVAL = 5000;  // 최소 5초 간격으로 전송 (중복 방지)
 
 // --- 운동 감지 및 안정화 설정 ---
-const float STABILITY_THRESHOLD = 100.0;  // ±2g 이내면 안정 상태
-const unsigned long STABILITY_DURATION = 10000;  // 10초 안정 유지 필요
-const int STABILITY_CHECK_COUNT = 1;  // 연속 3회 안정 확인
+const float STABILITY_THRESHOLD = 100.0;  // ±100g 이내면 안정 상태
+const unsigned long STABILITY_DURATION = 10000;  // 10초 안정 유지 필요 (큰 흔들림)
+const int STABILITY_CHECK_COUNT = 1;  // 연속 1회 안정 확인
+const float SMART_RECOVERY_THRESHOLD = 5.0;  // 스마트 복구: ±5g 이내면 샘플 유지
+const unsigned long MIN_STABILIZATION_TIME = 2000;  // 최소 안정화 시간 (작은 흔들림)
 
 // --- 예외 처리를 위한 설정값 ---
 const unsigned long WIFI_RECONNECT_INTERVAL = 30000; // 30초
@@ -75,10 +77,13 @@ const unsigned long WEIGHT_DETECTION_DELAY = 5000;  // 5초 지연
 
 // --- 유속 계산용 데이터 (슬라이딩 윈도우 방식) ---
 float weightHistory60[60];      // 최근 60초간 무게 샘플 (1초마다)
+bool sampleStability60[60];     // 각 샘플의 안정성 플래그 (true = 안정)
 int weightIndex60 = 0;
 bool weight60Full = false;      // 60개 샘플이 채워졌는지
 unsigned long lastWeightSampleTime = 0;
 const unsigned long WEIGHT_SAMPLE_INTERVAL = 1000;  // 1초마다 샘플링
+float weightBeforeUnstable = 0; // 불안정 상태 진입 전 무게 (스마트 복구용)
+unsigned long unstableStartTime = 0;  // 불안정 상태 시작 시간
 
 // --- 데이터 저장 ---
 float weightHistory[HISTORY_SIZE];
@@ -178,9 +183,10 @@ bool isWeightStable(float newWeight) {
   return diff <= STABILITY_THRESHOLD;
 }
 
-// --- 무게 샘플 추가 (1초마다 호출) ---
-void addWeightSample(float weight) {
+// --- 무게 샘플 추가 (1초마다 호출) - 안정성 플래그 포함 ---
+void addWeightSample(float weight, bool isStable) {
   weightHistory60[weightIndex60] = weight;
+  sampleStability60[weightIndex60] = isStable;
   weightIndex60++;
   if (weightIndex60 >= 60) {
     weightIndex60 = 0;
@@ -188,34 +194,64 @@ void addWeightSample(float weight) {
   }
 }
 
-// --- 유속 계산 (60초 슬라이딩 윈도우) ---
+// --- 유속 계산 (60초 슬라이딩 윈도우) - 안정된 샘플만 사용 ---
 float calculateFlowRate() {
   // 60개 샘플이 채워지지 않았으면 계산 불가
   if (!weight60Full) {
     return -1;  // 아직 60초 대기 중
   }
 
-  // 가장 오래된 샘플 (60초 전)
-  int oldestIndex = weightIndex60;  // 순환 버퍼에서 다음에 덮어씌워질 위치 = 가장 오래된 샘플
-  float oldestWeight = weightHistory60[oldestIndex];
+  // 안정된 샘플만 선택하여 유속 계산
+  int stableCount = 0;
+  float totalWeight = 0;
+  float firstStableWeight = -1;
+  float lastStableWeight = -1;
+  int firstStableIndex = -1;
+  int lastStableIndex = -1;
 
-  // 가장 최신 샘플 (현재)
-  int newestIndex = (weightIndex60 - 1 + 60) % 60;  // 이전 인덱스
-  float newestWeight = weightHistory60[newestIndex];
+  // 60개 샘플 중 안정된 샘플 찾기
+  for (int i = 0; i < 60; i++) {
+    if (sampleStability60[i]) {
+      stableCount++;
+      totalWeight += weightHistory60[i];
 
-  // 60초 동안의 무게 감소량 (g)
-  float weightChange = oldestWeight - newestWeight;
+      if (firstStableWeight < 0) {
+        firstStableWeight = weightHistory60[i];
+        firstStableIndex = i;
+      }
+      lastStableWeight = weightHistory60[i];
+      lastStableIndex = i;
+    }
+  }
+
+  // 안정된 샘플이 30개 미만이면 신뢰도 낮음
+  if (stableCount < 30) {
+    return -1;  // 불안정한 상태, 유속 계산 불가
+  }
+
+  // 가장 오래된 안정 샘플과 최신 안정 샘플 간 시간 차이 계산
+  int timeDiffSeconds = 0;
+  if (lastStableIndex >= firstStableIndex) {
+    timeDiffSeconds = lastStableIndex - firstStableIndex;
+  } else {
+    timeDiffSeconds = (60 - firstStableIndex) + lastStableIndex;
+  }
+
+  // 시간 차이가 20초 미만이면 유속 계산 불가
+  if (timeDiffSeconds < 20) {
+    return -1;
+  }
+
+  // 무게 감소량 계산
+  float weightChange = firstStableWeight - lastStableWeight;
 
   // 비정상 값 체크
   if (weightChange < 0) {
-    // 무게가 증가했음 (비정상) - 0으로 처리
-    return 0;
+    return 0;  // 무게 증가 (비정상)
   }
 
-  // 유속 계산: (60초간 감소량 g) / 60초 = g/s → * 60 = g/min ≈ mL/min
-  float flowRate = (weightChange / 60.0) * 60.0;  // = weightChange (단순화 가능)
-  // 실제로는: weightChange mL / 60초 = mL/min (1g ≈ 1mL 가정)
-  flowRate = weightChange;  // 60초간 감소량 = 분당 유속
+  // 유속 계산: (무게 감소량 g) / (시간 초) * 60 = mL/min
+  float flowRate = (weightChange / (float)timeDiffSeconds) * 60.0;
 
   return flowRate;
 }
@@ -644,6 +680,11 @@ void loop() {
         weight60Full = false;
         lastWeightSampleTime = now;
 
+        // 안정성 플래그 배열 초기화
+        for (int i = 0; i < 60; i++) {
+          sampleStability60[i] = true;  // 초기에는 모두 안정
+        }
+
         Serial.print("✅ 초기 무게 저장: ");
         Serial.print(initialWeight);
         Serial.println(" g");
@@ -783,6 +824,11 @@ void loop() {
                 weight60Full = false;
                 lastWeightSampleTime = now;
 
+                // 안정성 플래그 배열 초기화
+                for (int i = 0; i < 60; i++) {
+                  sampleStability60[i] = true;  // 초기에는 모두 안정
+                }
+
                 Serial.print("✅ 초기 무게 자동 저장: ");
                 Serial.print(initialWeight);
                 Serial.println(" g");
@@ -807,7 +853,9 @@ void loop() {
         if (!isWeightStable(currentWeight)) {
           currentState = UNSTABLE;
           stableCheckCount = 0;
-          Serial.println("\n⚠️ 운동 감지 - 측정 중단");
+          weightBeforeUnstable = lastStableWeight;  // 흔들림 전 무게 저장
+          unstableStartTime = now;  // 불안정 시작 시간 기록
+          Serial.println("\n⚠️ 운동 감지 - 측정 계속 (불안정 플래그)");
           digitalWrite(LED_BUILTIN, HIGH);  // LED ON
         } else {
           stableCheckCount++;
@@ -817,8 +865,8 @@ void loop() {
             unsigned long elapsed = now - startMillis;
             addHistory(currentWeight, elapsed);
 
-            // ✅ 1초마다 무게 샘플 추가 (슬라이딩 윈도우)
-            addWeightSample(currentWeight);
+            // ✅ 1초마다 무게 샘플 추가 (슬라이딩 윈도우) - 안정 플래그 포함
+            addWeightSample(currentWeight, true);  // STABLE 상태에서는 안정된 샘플
 
             // ✅ 유속 계산 (60초 슬라이딩 윈도우 기반)
             float flowRate = calculateFlowRate();
@@ -968,6 +1016,24 @@ void loop() {
         break;
 
       case UNSTABLE:
+        // 불안정 상태에서도 무게 측정 계속 (불안정 플래그로 마킹)
+        if (now - lastMeasureTime >= MEASURE_INTERVAL) {
+          unsigned long elapsed = now - startMillis;
+          addHistory(currentWeight, elapsed);
+
+          // ✅ 불안정 상태에서도 샘플 추가 (안정 플래그 = false)
+          addWeightSample(currentWeight, false);
+
+          lastMeasureTime = now;
+
+          // 시리얼 출력 (불안정 상태 표시)
+          Serial.print("[");
+          Serial.print(millis() / 1000);
+          Serial.print("s] ⚠️ 불안정: ");
+          Serial.print(currentWeight, 1);
+          Serial.println("g (샘플링 계속 중...)");
+        }
+
         // 불안정 상태에서 안정 확인
         if (isWeightStable(currentWeight)) {
           stableCheckCount++;
@@ -976,7 +1042,21 @@ void loop() {
             currentState = WAITING_STABILIZATION;
             lastStableTime = now;
             stableCheckCount = 0;
-            Serial.println("🔄 안정화 대기 중... (10초)");
+
+            // 안정화 시간 계산 (출력용)
+            float weightChange = abs(currentWeight - weightBeforeUnstable);
+            unsigned long requiredTime = STABILITY_DURATION;  // 기본 10초
+            if (weightChange < 50) {
+              requiredTime = MIN_STABILIZATION_TIME;  // 2초
+            } else if (weightChange < 200) {
+              requiredTime = 5000;  // 5초
+            }
+
+            Serial.print("🔄 안정화 대기 시작 (목표: ");
+            Serial.print(requiredTime / 1000);
+            Serial.print("초, 무게변화: ");
+            Serial.print(weightChange, 1);
+            Serial.println("g)");
           }
         } else {
           stableCheckCount = 0;  // 다시 흔들리면 카운트 리셋
@@ -985,22 +1065,105 @@ void loop() {
         break;
 
       case WAITING_STABILIZATION:
-        // 안정화 대기 중
+        // 안정화 대기 중 - 무게 측정 계속 (안정 플래그로 마킹)
+        if (now - lastMeasureTime >= MEASURE_INTERVAL) {
+          unsigned long elapsed = now - startMillis;
+          addHistory(currentWeight, elapsed);
+
+          // ✅ 안정화 대기 중에도 샘플 추가 (안정 플래그 = true, 이미 안정됨)
+          addWeightSample(currentWeight, true);
+
+          lastMeasureTime = now;
+
+          // ✅ 안정화 대기 중 상태 출력 (사용자 피드백)
+          unsigned long elapsedTime = now - lastStableTime;
+          float weightChange = abs(currentWeight - weightBeforeUnstable);
+          unsigned long requiredTime = STABILITY_DURATION;  // 기본 10초
+          if (weightChange < 50) {
+            requiredTime = MIN_STABILIZATION_TIME;  // 2초
+          } else if (weightChange < 200) {
+            requiredTime = 5000;  // 5초
+          }
+
+          Serial.print("[");
+          Serial.print(millis() / 1000);
+          Serial.print("s] 🔄 안정화 대기: ");
+          Serial.print(currentWeight, 1);
+          Serial.print("g | 경과: ");
+          Serial.print(elapsedTime / 1000);
+          Serial.print("/");
+          Serial.print(requiredTime / 1000);
+          Serial.print("초 | 무게변화: ");
+          Serial.print(weightChange, 1);
+          Serial.println("g");
+        }
+
+        // 재흔들림 감지
         if (!isWeightStable(currentWeight)) {
           currentState = UNSTABLE;
           stableCheckCount = 0;
           Serial.println("⚠️ 재흔들림 감지");
-        } else if (now - lastStableTime >= STABILITY_DURATION) {
-          currentState = STABLE;
-          lastMeasureTime = now - MEASURE_INTERVAL;  // 즉시 측정 가능하도록
+        }
+        // 스마트 샘플 복구 로직
+        else {
+          unsigned long unstableDuration = now - unstableStartTime;  // 불안정 지속 시간
+          float weightChange = abs(currentWeight - weightBeforeUnstable);  // 무게 변화량
 
-          // ✅ 무게 샘플링 재시작 (리셋)
-          weightIndex60 = 0;
-          weight60Full = false;
-          lastWeightSampleTime = now;
+          // 예상 무게 변화량 계산 (처방 유속 기반)
+          float expectedChange = 0;
+          if (prescription.isInitialized && prescription.prescribedRate > 0) {
+            expectedChange = (prescription.prescribedRate / 60.0) * (unstableDuration / 1000.0);  // mL/초 * 초
+          }
 
-          Serial.println("✅ 측정 재개 (60초 후 유속 계산 재시작)");
-          digitalWrite(LED_BUILTIN, LOW);  // LED OFF
+          // 스마트 복구 조건: 무게 변화가 예상 범위(±5g) 내
+          bool canSmartRecover = (abs(weightChange - expectedChange) <= SMART_RECOVERY_THRESHOLD);
+
+          // 적응형 안정화 시간 계산
+          unsigned long requiredStabilizationTime = STABILITY_DURATION;  // 기본 10초
+          if (weightChange < 50) {
+            requiredStabilizationTime = MIN_STABILIZATION_TIME;  // 작은 흔들림: 2초
+          } else if (weightChange < 200) {
+            requiredStabilizationTime = 5000;  // 중간 흔들림: 5초
+          }
+
+          // 안정화 시간 경과 확인
+          if (now - lastStableTime >= requiredStabilizationTime) {
+            currentState = STABLE;
+            lastMeasureTime = now - MEASURE_INTERVAL;  // 즉시 측정 가능하도록
+
+            if (canSmartRecover) {
+              // ✅ 스마트 복구: 60초 샘플 유지 (리셋 안함)
+              Serial.print("\n✅ 스마트 복구 완료 (샘플 유지) - 무게 변화: ");
+              Serial.print(weightChange, 1);
+              Serial.print("g, 예상: ");
+              Serial.print(expectedChange, 1);
+              Serial.print("g, 불안정 시간: ");
+              Serial.print(unstableDuration / 1000);
+              Serial.println("초");
+              Serial.println("📊 측정 즉시 재개:");
+            } else {
+              // ❌ 큰 변화 감지: 60초 샘플 리셋
+              weightIndex60 = 0;
+              weight60Full = false;
+              lastWeightSampleTime = now;
+
+              // 안정성 플래그 배열 초기화
+              for (int i = 0; i < 60; i++) {
+                sampleStability60[i] = true;  // 리셋 시 모두 안정으로 초기화
+              }
+
+              Serial.print("\n⚠️ 큰 변화 감지 (샘플 리셋) - 무게 변화: ");
+              Serial.print(weightChange, 1);
+              Serial.print("g, 예상: ");
+              Serial.print(expectedChange, 1);
+              Serial.println("g");
+              Serial.println("📊 60초 재측정 시작:");
+            }
+
+            digitalWrite(LED_BUILTIN, LOW);  // LED OFF
+            unstableStartTime = 0;  // 리셋
+            weightBeforeUnstable = 0;
+          }
         }
         lastStableWeight = currentWeight;
         break;

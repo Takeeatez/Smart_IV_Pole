@@ -56,6 +56,22 @@ public class InfusionSession {
     @Column(name = "total_volume_ml", nullable = false)
     private Integer totalVolumeMl;
 
+    // Real-time sensor data from ESP8266
+    @Column(name = "real_time_weight")
+    private Double realTimeWeight;
+
+    @Column(name = "measured_flow_rate")
+    private Double measuredFlowRate;
+
+    @Column(name = "deviation_percent")
+    private Double deviationPercent;
+
+    @Column(name = "sensor_state", length = 20)
+    private String sensorState;
+
+    @Column(name = "last_sensor_update")
+    private LocalDateTime lastSensorUpdate;
+
     // Relationships
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id", insertable = false, updatable = false)

@@ -77,13 +77,20 @@ public class Esp8266Controller {
             int remainingVolume = weightRemaining != null ? weightRemaining.intValue() : session.getRemainingVolume();
             session.setRemainingVolume(remainingVolume);
 
+            // 실시간 센서 데이터 업데이트
+            session.setRealTimeWeight(currentWeight);
+            session.setMeasuredFlowRate(flowRateMeasured);
+            session.setDeviationPercent(deviationPercent);
+            session.setSensorState(state);
+            session.setLastSensorUpdate(LocalDateTime.now());
+
             // 예측 종료 시간 계산 및 저장
             if (remainingTimeSec != null && remainingTimeSec > 0) {
                 LocalDateTime endExpTime = LocalDateTime.now().plusSeconds(remainingTimeSec.longValue());
                 session.setEndExpTime(endExpTime);
             }
 
-            // DB 저장
+            // DB 저장 (실시간 데이터 포함)
             infusionSessionService.updateRemainingVolume(session.getSessionId(), remainingVolume);
 
             // 4. 유속 편차가 크면 자동 경고 생성
