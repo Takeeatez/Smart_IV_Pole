@@ -3,6 +3,8 @@ package com.example.smartpole.service;
 import com.example.smartpole.entity.Patient;
 import com.example.smartpole.repository.PatientRepository;
 import com.example.smartpole.repository.PrescriptionRepository;
+import com.example.smartpole.repository.InfusionSessionRepository;
+import com.example.smartpole.repository.PoleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +19,8 @@ public class PatientService {
 
     private final PatientRepository patientRepository;
     private final PrescriptionRepository prescriptionRepository;
+    private final InfusionSessionRepository infusionSessionRepository;
+    private final PoleRepository poleRepository;
 
     public List<Patient> getAllPatients() {
         return patientRepository.findAll();
@@ -73,10 +77,17 @@ public class PatientService {
             throw new RuntimeException("Patient not found with id: " + id);
         }
 
-        // Delete all prescriptions for this patient first (cascade deletion)
+        // Delete all related data in correct order to avoid foreign key constraint violations
+        // 0. Clear pole assignments first (poles.patient_id → NULL)
+        poleRepository.clearPatientAssignment(id);
+
+        // 1. Delete IV sessions (references prescriptions)
+        infusionSessionRepository.deleteByPatientId(id);
+
+        // 2. Delete all prescriptions for this patient
         prescriptionRepository.deleteByPatientId(id);
 
-        // Then delete the patient
+        // 3. Finally delete the patient
         patientRepository.deleteById(id);
     }
 

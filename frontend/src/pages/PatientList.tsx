@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X } from 'lucide-react';
+import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X, Radio } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
 import { calculateProgress, calculateRemainingTime } from '../utils/gttCalculator';
 import PatientModal from '../components/patient/PatientModal';
+import PoleConnectionModal from '../components/patient/PoleConnectionModal';
 import Sidebar from '../components/layout/Sidebar';
 
 const PatientList: React.FC = () => {
@@ -13,6 +14,8 @@ const PatientList: React.FC = () => {
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
   const [patientToDelete, setPatientToDelete] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPoleModal, setShowPoleModal] = useState(false);
+  const [poleConnectionPatient, setPoleConnectionPatient] = useState<string | null>(null);
 
   // Advanced filtering states
   const [statusFilter, setStatusFilter] = useState<'all' | 'normal' | 'warning' | 'critical' | 'offline'>('all');
@@ -218,6 +221,15 @@ const PatientList: React.FC = () => {
     return patientToDelete ? patients.find(p => p.id === patientToDelete) : null;
   };
 
+  const handleConnectPole = (patientId: string) => {
+    setPoleConnectionPatient(patientId);
+    setShowPoleModal(true);
+  };
+
+  const getPoleConnectionPatient = () => {
+    return poleConnectionPatient ? patients.find(p => p.id === poleConnectionPatient) : null;
+  };
+
   return (
     <>
       <div className="flex h-screen bg-gray-50">
@@ -399,7 +411,8 @@ const PatientList: React.FC = () => {
                     const poleData = getPatientPoleData(patient.id);
                     const prescription = patient.currentPrescription;
                     // startedAt이 있으면 사용, 없으면 prescribedAt을 fallback으로 사용
-                    const startTime = prescription?.startedAt || prescription?.prescribedAt;
+                    const startTimeRaw = prescription?.startedAt || prescription?.prescribedAt;
+                    const startTime = startTimeRaw ? new Date(startTimeRaw) : null;
                     const progress = (prescription && startTime) ? calculateProgress(startTime, prescription.duration) : 0;
                     const remainingTime = (prescription && startTime) ? calculateRemainingTime(startTime, prescription.duration) : 0;
 
@@ -492,6 +505,17 @@ const PatientList: React.FC = () => {
                               title="정보 수정"
                             >
                               <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleConnectPole(patient.id)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                patient.poleId
+                                  ? 'text-purple-600 hover:bg-purple-50'
+                                  : 'text-gray-600 hover:bg-gray-50'
+                              }`}
+                              title={patient.poleId ? `폴대: ${patient.poleId}` : '폴대 연결'}
+                            >
+                              <Radio className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDeletePatient(patient.id)}
@@ -618,6 +642,20 @@ const PatientList: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pole Connection Modal */}
+      {showPoleModal && poleConnectionPatient && (
+        <PoleConnectionModal
+          isOpen={showPoleModal}
+          onClose={() => {
+            setShowPoleModal(false);
+            setPoleConnectionPatient(null);
+          }}
+          patientId={poleConnectionPatient}
+          patientName={getPoleConnectionPatient()?.name || ''}
+          currentPoleId={getPoleConnectionPatient()?.poleId}
+        />
       )}
     </>
   );

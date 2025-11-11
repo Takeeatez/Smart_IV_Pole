@@ -42,7 +42,7 @@ The project follows a modular retrofit design with these main components:
 ### Backend (Spring Boot)
 - **Framework**: Spring Boot 3.5.5 with Java 21
 - **Database**: MariaDB with Hibernate JPA
-- **Configuration**: Hibernate DDL auto-create, external MariaDB server
+- **Configuration**: Hibernate DDL auto-update, external MariaDB server at 61.245.248.192:3306
 - **Port**: 8081 (configured in application.yml)
 - **Dependencies**: Spring Web, Spring Data JPA, Validation, WebFlux, Lombok
 
@@ -56,6 +56,7 @@ The project follows a modular retrofit design with these main components:
 - **Port**: 5173 (Vite default)
 
 ### Database Schema (MariaDB)
+- **Server**: 61.245.248.192:3306 (username: yizy, database: smartpole)
 - **patients**: Patient info with room_id and bed_number for bed assignment persistence
 - **drip_types**: IV fluid types and medications
 - **infusion_sessions**: Active IV sessions with real-time monitoring data
@@ -251,6 +252,17 @@ curl http://localhost:8081/api/v1/drips
 curl -X POST http://localhost:8081/api/v1/drips \
   -H "Content-Type: application/json" \
   -d '{"dripName":"Normal Saline 500mL"}'
+```
+
+### Direct Database Access
+```bash
+# Connect to MariaDB server (credentials in Smart_IV_Pole-be/.env)
+mysql -h 61.245.248.193 -P 3308 -u yizy --skip-ssl -p
+# Password: (see Smart_IV_Pole-be/.env file)
+
+# Once connected, use the database
+USE smartpole;
+SHOW TABLES;
 ```
 
 ## Medical Compliance & UI Standards

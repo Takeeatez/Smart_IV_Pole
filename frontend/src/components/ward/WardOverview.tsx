@@ -21,7 +21,8 @@ const WardOverview: React.FC = () => {
     setSelectedPatient,
     getActiveAlerts,
     getCriticalAlerts,
-    fetchPatients
+    fetchPatients,
+    fetchAlerts
   } = useWardStore();
 
   const { isConnected, connectionStatus } = useMQTT();
@@ -44,6 +45,21 @@ const WardOverview: React.FC = () => {
   useEffect(() => {
     fetchPatients();
   }, [fetchPatients]);
+
+  // 🔔 실시간 데이터 폴링 (10초마다 환자 데이터 + 알림 자동 새로고침)
+  // ESP32가 이벤트 기반 전송을 하므로 DB 변경 시에만 새 데이터 수신
+  useEffect(() => {
+    // 초기 알림 로드
+    fetchAlerts();
+
+    // 10초마다 환자 데이터 + 알림 폴링 (이벤트 발생 시에만 변경됨)
+    const pollingInterval = setInterval(() => {
+      fetchPatients();  // ESP32 이벤트 전송 시 DB 업데이트 반영
+      fetchAlerts();    // 새 알림 확인
+    }, 10000);  // 10초 간격
+
+    return () => clearInterval(pollingInterval);
+  }, [fetchPatients, fetchAlerts]);
 
   const activeAlerts = getActiveAlerts();
   const criticalAlerts = getCriticalAlerts();

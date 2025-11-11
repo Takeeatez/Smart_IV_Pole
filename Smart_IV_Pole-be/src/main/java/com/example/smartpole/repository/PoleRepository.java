@@ -2,6 +2,7 @@ package com.example.smartpole.repository;
 
 import com.example.smartpole.entity.Pole;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,6 +18,12 @@ public interface PoleRepository extends JpaRepository<Pole, String> {
 
     // Find active poles
     List<Pole> findByStatusOrderByPoleIdAsc(Pole.PoleStatus status);
+
+    // Find online poles
+    List<Pole> findByIsOnlineOrderByPoleIdAsc(Boolean isOnline);
+
+    // Find available online poles (online + not assigned)
+    List<Pole> findByIsOnlineAndPatientIdIsNullOrderByPoleIdAsc(Boolean isOnline);
 
     // Find poles with low battery
     @Query("SELECT p FROM Pole p WHERE p.batteryLevel <= :threshold ORDER BY p.batteryLevel ASC")
@@ -45,4 +52,9 @@ public interface PoleRepository extends JpaRepository<Pole, String> {
     List<Pole> findAssignedPoles();
 
     boolean existsByPatientId(Integer patientId);
+
+    // Clear patient assignment (for patient deletion)
+    @Modifying
+    @Query("UPDATE Pole p SET p.patientId = NULL WHERE p.patientId = :patientId")
+    void clearPatientAssignment(@Param("patientId") Integer patientId);
 }

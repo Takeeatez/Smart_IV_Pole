@@ -32,6 +32,18 @@ public class PoleController {
         return ResponseEntity.ok(poles);
     }
 
+    @GetMapping("/online")
+    public ResponseEntity<List<Pole>> getOnlinePoles() {
+        List<Pole> poles = poleService.getOnlinePoles();
+        return ResponseEntity.ok(poles);
+    }
+
+    @GetMapping("/available-online")
+    public ResponseEntity<List<Pole>> getAvailableOnlinePoles() {
+        List<Pole> poles = poleService.getAvailableOnlinePoles();
+        return ResponseEntity.ok(poles);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Pole> getPoleById(@PathVariable String id) {
         Optional<Pole> pole = poleService.getPoleById(id);

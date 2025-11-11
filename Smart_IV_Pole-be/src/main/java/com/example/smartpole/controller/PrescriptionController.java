@@ -1,5 +1,6 @@
 package com.example.smartpole.controller;
 
+import com.example.smartpole.dto.ApiResponse;
 import com.example.smartpole.entity.Prescription;
 import com.example.smartpole.service.PrescriptionService;
 import lombok.RequiredArgsConstructor;
@@ -8,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -74,12 +76,17 @@ public class PrescriptionController {
     }
 
     @PostMapping
-    public ResponseEntity<Prescription> createPrescription(@RequestBody Prescription prescription) {
+    public ResponseEntity<ApiResponse<Prescription>> createPrescription(@RequestBody Prescription prescription) {
         try {
             Prescription savedPrescription = prescriptionService.createPrescription(prescription);
-            return ResponseEntity.status(HttpStatus.CREATED).body(savedPrescription);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success(savedPrescription, "처방이 성공적으로 생성되었습니다."));
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().build();
+            // 에러 메시지를 로그로 출력하고 클라이언트에게 전달
+            System.err.println("❌ [PRESCRIPTION-ERROR] " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage(), "처방 생성 실패"));
         }
     }
 

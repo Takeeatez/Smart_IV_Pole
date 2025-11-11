@@ -26,6 +26,15 @@ public class PoleService {
         return poleRepository.findByStatusOrderByPoleIdAsc(Pole.PoleStatus.active);
     }
 
+    public List<Pole> getOnlinePoles() {
+        return poleRepository.findByIsOnlineOrderByPoleIdAsc(true);
+    }
+
+    public List<Pole> getAvailableOnlinePoles() {
+        // 온라인 + 할당되지 않은 폴대
+        return poleRepository.findByIsOnlineAndPatientIdIsNullOrderByPoleIdAsc(true);
+    }
+
     public Optional<Pole> getPoleById(String poleId) {
         return poleRepository.findById(poleId);
     }

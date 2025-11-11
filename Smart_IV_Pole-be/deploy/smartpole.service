@@ -1,0 +1,26 @@
+[Unit]
+Description=Smart IV Pole Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/smart-iv-pole
+ExecStart=/usr/bin/java -jar /opt/smart-iv-pole/smart-iv-pole-backend.jar
+EnvironmentFile=/opt/smart-iv-pole/.env
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smartpole
+
+# 리소스 제한 (t2.micro 최적화)
+MemoryLimit=800M
+CPUQuota=80%
+
+# 환경 변수 (기본값, .env 파일로 오버라이드 가능)
+Environment="SPRING_PROFILES_ACTIVE=prod"
+Environment="SERVER_PORT=8080"
+
+[Install]
+WantedBy=multi-user.target

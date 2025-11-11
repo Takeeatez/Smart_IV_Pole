@@ -21,15 +21,15 @@ public class AlertLog {
     @Column(name = "alert_id")
     private Integer alertId;
 
-    @Column(name = "session_id", nullable = false)
+    @Column(name = "session_id", nullable = true)
     private Integer sessionId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "alert_type", nullable = false)
+    @Column(name = "alert_type", nullable = false, length = 50)
     private AlertType alertType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "severity", nullable = false)
+    @Column(name = "severity", nullable = false, length = 20)
     private Severity severity;
 
     @Column(name = "message", nullable = false, columnDefinition = "TEXT")
@@ -47,13 +47,10 @@ public class AlertLog {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
-    // Relationship
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "session_id", insertable = false, updatable = false)
-    private InfusionSession infusionSession;
+    // Note: @ManyToOne relationship removed to allow NULL session_id for nurse calls without active sessions
 
     public enum AlertType {
-        low_volume, flow_stopped, pole_fall, battery_low, system_error
+        low_volume, flow_stopped, pole_fall, battery_low, system_error, nurse_call
     }
 
     public enum Severity {

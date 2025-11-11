@@ -49,6 +49,10 @@ interface WardStore {
   // Server connection
   checkConnection: () => Promise<void>;
 
+  // Alert Management with Backend API
+  fetchAlerts: () => Promise<void>;
+  acknowledgeAlertBackend: (alertId: string, nurseId: string) => Promise<void>;
+
   // 🔄 NEW: Real-time sync callbacks
   registerPrescriptionCallback: (patientId: string, callback: () => void) => void;
   unregisterPrescriptionCallback: (patientId: string) => void;
@@ -60,6 +64,10 @@ interface WardStore {
   autoRecoverPrescription: (patientId: string) => Promise<boolean>;
   ensurePrescriptionConsistency: (patientId: string) => Promise<void>;
   getPrescriptionStatus: (patientId: string) => 'loading' | 'available' | 'missing' | 'error';
+
+  // 🔌 NEW: Pole connection management
+  connectPoleToPatient: (patientId: string, poleId: string) => Promise<void>;
+  disconnectPoleFromPatient: (patientId: string) => Promise<void>;
 }
 
 // Helper function to determine status color based on pole data
@@ -143,7 +151,7 @@ const convertDBPatientToFrontend = (
     finalCurrentPrescription = existingPatient.currentPrescription;
   }
 
-  if (prescriptionHistory.length === 0 && existingPatient?.prescriptionHistory && existingPatient.prescriptionHistory.length > 0) {
+  if (prescriptionHistory && prescriptionHistory.length === 0 && existingPatient?.prescriptionHistory && existingPatient.prescriptionHistory.length > 0) {
     console.log(`💾 [DATA-PRESERVE] Preserving local prescription history for ${dbPatient.name}: ${existingPatient.prescriptionHistory.length} items`);
     finalPrescriptionHistory = existingPatient.prescriptionHistory;
   }
@@ -169,7 +177,7 @@ const convertDBPatientToFrontend = (
 };
 
 // Helper function to convert frontend Patient to DB PatientDB type
-const convertFrontendPatientToDB = (patient: Omit<Patient, 'id'>, bedNumber: string, phone?: string): Omit<PatientDB, 'patientId' | 'createdAt'> => {
+const convertFrontendPatientToDB = (patient: Omit<Patient, 'id'>, bedNumber: string, phone?: string, pinCode?: string): Omit<PatientDB, 'patientId' | 'createdAt'> => {
   // 생년월일 계산 (나이에서 추정)
   const currentYear = new Date().getFullYear();
   const birthYear = patient.age ? currentYear - patient.age : currentYear - 30; // 기본값 30세
@@ -181,6 +189,7 @@ const convertFrontendPatientToDB = (patient: Omit<Patient, 'id'>, bedNumber: str
   return {
     name: patient.name,
     phone: phone || '010-0000-0000', // 필수 필드 - 기본값 제공
+    pinCode: pinCode, // 모바일 앱 로그인용 PIN (6자리)
     birthDate: birthDate,
     gender: patient.gender,
     weightKg: patient.weight ? Math.round(patient.weight) : undefined, // 정수로 변환
@@ -233,13 +242,27 @@ export const useWardStore = create<WardStore>((set, get) => ({
       }
 
       // Update beds with new pole data
+      // Find bed by poleId OR by patientId (from WebSocket data)
       const updatedBeds = state.beds.map(bed => {
+        // Match by existing poleData.poleId
         if (bed.poleData?.poleId === poleId) {
           return {
             ...bed,
             poleData: newPoleData.get(poleId)
           };
         }
+
+        // NEW: Match by patientId if poleData not set yet
+        // This handles initial WebSocket connection
+        const patientIdMatch = data.patientId && bed.patient?.id === data.patientId;
+        if (patientIdMatch && !bed.poleData) {
+          console.log(`🔗 Linking pole ${poleId} to bed ${bed.bedNumber} (Patient ID: ${data.patientId})`);
+          return {
+            ...bed,
+            poleData: newPoleData.get(poleId)
+          };
+        }
+
         return bed;
       });
 
@@ -543,8 +566,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
       set({ isServerConnected: isConnected });
 
       if (isConnected) {
-        // 서버에 환자 추가 - 변환 함수 사용 (침대 정보 포함)
-        const dbPatient = convertFrontendPatientToDB(patientData, bedNumber, patientData.phone);
+        // 서버에 환자 추가 - 변환 함수 사용 (침대 정보 + PIN 포함)
+        const dbPatient = convertFrontendPatientToDB(patientData, bedNumber, patientData.phone, patientData.pinCode);
 
         const response = await patientAPI.createPatient(dbPatient);
 
@@ -865,9 +888,9 @@ export const useWardStore = create<WardStore>((set, get) => ({
         console.error('❌ [DRUG-ERROR] 약품 타입 조회 실패, 기본값 사용:', error);
       }
 
-      // 백엔드 Prescription API 호출 (startedAt 포함)
+      // 백엔드 Prescription API 호출 (startedAt은 백엔드에서 처리)
       const numericPatientId = parseInt(patientId.replace('P', ''));
-      const prescriptionRequest: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt'> = {
+      const prescriptionRequest: Omit<PrescriptionDB, 'id' | 'prescribedAt' | 'completedAt' | 'startedAt'> = {
         patientId: numericPatientId,
         drugTypeId: drugTypeId,
         totalVolumeMl: Math.round(prescriptionData.totalVolume), // Integer로 변환
@@ -877,8 +900,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
         durationHours: prescriptionData.duration / 60, // 분을 시간으로 변환 (Double 유지)
         specialInstructions: prescriptionData.notes || '',
         status: 'PRESCRIBED',
-        prescribedBy: prescriptionData.prescribedBy,
-        startedAt: prescriptionData.startedAt?.toISOString() || new Date().toISOString() // 투여 시작 시간 포함
+        prescribedBy: prescriptionData.prescribedBy || '간호사' // 빈 문자열일 경우 기본값
       };
 
       console.log('📤 [PRESCRIPTION-API] 백엔드로 전송할 데이터:', JSON.stringify(prescriptionRequest, null, 2));
@@ -1372,5 +1394,223 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
     const isValid = get().validatePrescriptionData(patientId);
     return isValid ? 'available' : 'error';
-  }
+  },
+
+  // ===== Alert Management with Backend API =====
+
+  /**
+   * Fetch alerts from backend
+   */
+  fetchAlerts: async () => {
+    const { isServerConnected } = get();
+
+    if (!isServerConnected) {
+      console.log('⚠️ [fetchAlerts] Server not connected, skipping alert fetch');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:8081/api/v1/alerts', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const backendAlerts = await response.json();
+
+        // Convert backend AlertLog format to frontend Alert format
+        const convertedAlerts: Alert[] = backendAlerts.map((backendAlert: any) => {
+          // Find patient by session ID (need to map session -> patient)
+          const session = get().patients.find(p =>
+            p.currentPrescription && p.id === `P${backendAlert.sessionId}`
+          );
+
+          return {
+            id: `ALERT-${backendAlert.alertId}`,
+            patientId: session?.id || '',
+            poleId: session?.poleId || '',
+            type: backendAlert.alertType === 'nurse_call' ? 'button_pressed' :
+                  backendAlert.alertType === 'low_volume' ? 'low' :
+                  backendAlert.alertType === 'flow_stopped' ? 'empty' :
+                  backendAlert.alertType === 'battery_low' ? 'battery_low' :
+                  backendAlert.alertType === 'pole_fall' ? 'abnormal' : 'offline',
+            severity: backendAlert.severity as 'info' | 'warning' | 'critical',
+            message: backendAlert.message,
+            timestamp: new Date(backendAlert.createdAt),
+            acknowledged: backendAlert.acknowledged,
+          };
+        });
+
+        // Update state with fetched alerts
+        set({ alerts: convertedAlerts });
+        console.log(`✅ [fetchAlerts] Loaded ${convertedAlerts.length} alerts from backend`);
+      } else {
+        console.error('❌ [fetchAlerts] Failed to fetch alerts:', response.statusText);
+      }
+    } catch (error) {
+      console.error('❌ [fetchAlerts] Error fetching alerts:', error);
+    }
+  },
+
+  /**
+   * Acknowledge alert on backend
+   */
+  acknowledgeAlertBackend: async (alertId: string, nurseId: string) => {
+    const { isServerConnected } = get();
+
+    if (!isServerConnected) {
+      console.log('⚠️ [acknowledgeAlert] Server not connected, using local storage only');
+      get().acknowledgeAlert(alertId, nurseId);
+      return;
+    }
+
+    try {
+      // Extract backend alert ID from frontend alert ID (ALERT-123 -> 123)
+      const backendAlertId = alertId.replace('ALERT-', '');
+
+      const response = await fetch(`http://localhost:8081/api/v1/alerts/${backendAlertId}/acknowledge?nurseId=${nurseId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ [acknowledgeAlert] Alert ${alertId} acknowledged on backend`);
+
+        // Update local state
+        get().acknowledgeAlert(alertId, nurseId);
+
+        // Refresh alerts from backend
+        await get().fetchAlerts();
+      } else {
+        console.error('❌ [acknowledgeAlert] Failed to acknowledge alert on backend:', response.statusText);
+        // Fallback to local state update
+        get().acknowledgeAlert(alertId, nurseId);
+      }
+    } catch (error) {
+      console.error('❌ [acknowledgeAlert] Error acknowledging alert:', error);
+      // Fallback to local state update
+      get().acknowledgeAlert(alertId, nurseId);
+    }
+  },
+
+  /**
+   * Connect pole to patient
+   */
+  connectPoleToPatient: async (patientId: string, poleId: string) => {
+    const { isServerConnected, patients } = get();
+
+    if (!isServerConnected) {
+      throw new Error('서버에 연결되어 있지 않습니다');
+    }
+
+    try {
+      console.log(`🔌 [connectPole] Connecting pole ${poleId} to patient ${patientId}`);
+
+      // Extract numeric patient ID from string (P123 -> 123)
+      const numericPatientId = patientId.replace('P', '');
+
+      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/connect?patientId=${numericPatientId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ [connectPole] Successfully connected pole ${poleId} to patient ${patientId}`);
+
+        // Update local state - find patient and update poleId
+        const updatedPatients = patients.map(patient => {
+          if (patient.id === patientId) {
+            return { ...patient, poleId };
+          }
+          return patient;
+        });
+
+        set({ patients: updatedPatients });
+
+        // 처방 정보가 있으면 ESP8266으로 전송 (백엔드가 자동 처리)
+        const patient = patients.find(p => p.id === patientId);
+        if (patient?.currentPrescription) {
+          console.log(`📤 [connectPole] Prescription data will be sent to ESP8266 via backend`);
+        }
+
+        // Refresh patients data to sync with backend
+        await get().fetchPatients();
+
+        // Save to storage
+        get().saveToStorage();
+      } else {
+        const error = await response.text();
+        console.error('❌ [connectPole] Failed to connect pole:', error);
+        throw new Error(`폴대 연결 실패: ${error}`);
+      }
+    } catch (error) {
+      console.error('❌ [connectPole] Error connecting pole:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Disconnect pole from patient
+   */
+  disconnectPoleFromPatient: async (patientId: string) => {
+    const { isServerConnected, patients } = get();
+
+    if (!isServerConnected) {
+      throw new Error('서버에 연결되어 있지 않습니다');
+    }
+
+    try {
+      console.log(`🔌 [disconnectPole] Disconnecting pole from patient ${patientId}`);
+
+      // Find patient's current pole
+      const patient = patients.find(p => p.id === patientId);
+      if (!patient?.poleId) {
+        console.warn(`⚠️ [disconnectPole] Patient ${patientId} has no connected pole`);
+        return;
+      }
+
+      const poleId = patient.poleId;
+
+      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/disconnect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ [disconnectPole] Successfully disconnected pole ${poleId} from patient ${patientId}`);
+
+        // Update local state - remove poleId from patient
+        const updatedPatients = patients.map(p => {
+          if (p.id === patientId) {
+            const { poleId, ...rest } = p;
+            return rest;
+          }
+          return p;
+        });
+
+        set({ patients: updatedPatients });
+
+        // Refresh patients data to sync with backend
+        await get().fetchPatients();
+
+        // Save to storage
+        get().saveToStorage();
+      } else {
+        const error = await response.text();
+        console.error('❌ [disconnectPole] Failed to disconnect pole:', error);
+        throw new Error(`폴대 연결 해제 실패: ${error}`);
+      }
+    } catch (error) {
+      console.error('❌ [disconnectPole] Error disconnecting pole:', error);
+      throw error;
+    }
+  },
 }));

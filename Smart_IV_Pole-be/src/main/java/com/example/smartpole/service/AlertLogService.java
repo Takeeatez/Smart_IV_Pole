@@ -101,4 +101,20 @@ public class AlertLogService {
 
         return alertLogRepository.save(alert);
     }
+
+    // Nurse call alert (환자가 간호사 호출 버튼 누름)
+    @Transactional
+    public AlertLog createNurseCallAlert(Integer sessionId, Integer patientId, String patientName) {
+        String message = String.format("환자 %s님이 간호사를 호출했습니다", patientName);
+        AlertLog alert = new AlertLog();
+        // sessionId가 null이거나 0이면 null로 저장 (세션 없이 호출한 경우)
+        alert.setSessionId(sessionId != null && sessionId > 0 ? sessionId : null);
+        alert.setAlertType(AlertLog.AlertType.nurse_call);
+        alert.setSeverity(AlertLog.Severity.critical);
+        alert.setMessage(message);
+        alert.setCreatedAt(LocalDateTime.now());
+        alert.setAcknowledged(false);
+
+        return alertLogRepository.save(alert);
+    }
 }

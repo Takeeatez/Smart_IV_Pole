@@ -25,7 +25,12 @@
       "Bash(python3:*)",
       "Read(//Users/ayaan/Git/**)",
       "Bash(npx tailwindcss:*)",
-      "Bash(git merge:*)"
+      "Bash(flutter create:*)",
+      "Bash(flutter pub add:*)",
+      "Bash(chmod:*)",
+      "Bash(git add:*)",
+      "Bash(git merge:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

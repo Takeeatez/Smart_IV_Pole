@@ -43,9 +43,8 @@ ESP8266 기반 스마트 링거 폴대 하드웨어 펌웨어
 
 3. 라이브러리 설치
    - Tools → Manage Libraries에서 설치:
-   - HX711 by Bogde
-   - PubSubClient by Nick O'Leary
-   - ArduinoJson by Benoit Blanchon
+   - **HX711 by Bogde** (로드셀 센서)
+   - **ArduinoJson by Benoit Blanchon** (버전 6.x) - **필수**
 
 4. 보드 설정
    - Board: NodeMCU 1.0 (ESP-12E Module)

@@ -5,7 +5,6 @@ import {
   Wifi,
   WifiOff,
   Settings,
-  Plus,
   Search,
   Filter,
   Power,
@@ -56,96 +55,67 @@ const DeviceManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
-  // 예시 폴대 데이터
+  // 백엔드에서 실제 폴대 데이터 가져오기
   useEffect(() => {
-    const mockPoles: PoleDevice[] = [
-      {
-        id: 'pole-001',
-        serialNumber: 'MP2024-001',
-        name: 'MEDIPOLE Unit 001',
-        status: 'online',
-        batteryLevel: 85,
-        location: {
-          room: '301A',
-          bedNumber: '1'
-        },
-        lastSeen: new Date(),
-        firmwareVersion: '2.1.3',
-        isAssigned: true,
-        currentPatient: {
-          id: 'patient-001',
-          name: '김철수'
-        },
-        hardware: {
-          model: 'MEDIPOLE-Pro',
-          year: 2024
-        },
-        connectivity: {
-          wifi: true,
-          signalStrength: 92
-        },
-        maintenance: {
-          lastCheck: new Date('2024-09-20'),
-          nextCheck: new Date('2024-12-20')
-        }
-      },
-      {
-        id: 'pole-002',
-        serialNumber: 'MP2024-002',
-        name: 'MEDIPOLE Unit 002',
-        status: 'offline',
-        batteryLevel: 0,
-        location: {
-          room: '창고',
-        },
-        lastSeen: new Date('2024-09-25'),
-        firmwareVersion: '2.1.2',
-        isAssigned: false,
-        hardware: {
-          model: 'MEDIPOLE-Pro',
-          year: 2024
-        },
-        connectivity: {
-          wifi: false,
-          signalStrength: 0
-        },
-        maintenance: {
-          lastCheck: new Date('2024-09-15'),
-          nextCheck: new Date('2024-12-15')
-        }
-      },
-      {
-        id: 'pole-003',
-        serialNumber: 'MP2024-003',
-        name: 'MEDIPOLE Unit 003',
-        status: 'maintenance',
-        batteryLevel: 45,
-        location: {
-          room: '정비실',
-        },
-        lastSeen: new Date('2024-09-26'),
-        firmwareVersion: '2.1.3',
-        isAssigned: false,
-        hardware: {
-          model: 'MEDIPOLE-Standard',
-          year: 2023
-        },
-        connectivity: {
-          wifi: true,
-          signalStrength: 65
-        },
-        maintenance: {
-          lastCheck: new Date(),
-          nextCheck: new Date('2024-10-28')
-        }
-      }
-    ];
+    const fetchPoles = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('http://localhost:8081/api/v1/poles');
 
-    // 실제 환경에서는 API 호출
-    setTimeout(() => {
-      setPoles(mockPoles);
-      setLoading(false);
-    }, 1000);
+        if (response.ok) {
+          const backendPoles = await response.json();
+
+          // 백엔드 데이터를 프론트엔드 형식으로 변환
+          const convertedPoles: PoleDevice[] = backendPoles.map((pole: any) => ({
+            id: pole.poleId,
+            serialNumber: pole.poleId, // 시리얼 번호는 poleId 사용
+            name: `폴대 ${pole.poleId}`,
+            status: pole.isOnline ? 'online' : 'offline',
+            batteryLevel: pole.batteryLevel || 0,
+            location: {
+              room: pole.patientId ? '병실' : '대기중',
+              bedNumber: pole.patientId ? undefined : undefined
+            },
+            lastSeen: pole.lastPingAt ? new Date(pole.lastPingAt) : new Date(),
+            firmwareVersion: '2.1.3', // 고정값 (추후 백엔드에서 제공)
+            isAssigned: !!pole.patientId,
+            currentPatient: pole.patientId ? {
+              id: pole.patientId.toString(),
+              name: '환자' // 실제로는 환자 정보 조인 필요
+            } : undefined,
+            hardware: {
+              model: 'ESP8266',
+              year: 2024
+            },
+            connectivity: {
+              wifi: pole.isOnline,
+              signalStrength: pole.isOnline ? 85 : 0 // 추후 실제 신호 세기 추가
+            },
+            maintenance: {
+              lastCheck: new Date(),
+              nextCheck: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) // 90일 후
+            }
+          }));
+
+          setPoles(convertedPoles);
+          console.log('✅ 폴대 목록 로드 완료:', convertedPoles.length, '개');
+        } else {
+          console.error('❌ 폴대 목록 로드 실패:', response.statusText);
+          setPoles([]);
+        }
+      } catch (error) {
+        console.error('❌ 폴대 목록 로드 중 오류:', error);
+        setPoles([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPoles();
+
+    // 30초마다 자동 새로고침
+    const interval = setInterval(fetchPoles, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const getStatusColor = (status: PoleDevice['status']) => {
@@ -223,14 +193,14 @@ const DeviceManagement: React.FC = () => {
       <div className="flex-1 p-6 overflow-auto">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">IV 폴대 관리</h1>
-              <p className="text-gray-600 mt-1">MEDIPOLE 장비 상태 및 관리</p>
-            </div>
-            <Button leftIcon={<Plus />}>
-              새 폴대 등록
-            </Button>
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold text-gray-900">IV 폴대 관리</h1>
+            <p className="text-gray-600 mt-1">
+              실시간 폴대 상태 모니터링 (ESP8266 자동 등록)
+            </p>
+            <p className="text-sm text-gray-500 mt-1">
+              💡 폴대가 핑을 보내면 자동으로 등록됩니다
+            </p>
           </div>
 
           {/* Stats Cards */}

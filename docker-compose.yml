@@ -23,10 +23,10 @@ services:
     container_name: smart-iv-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: smart_iv_root_2024
-      MYSQL_DATABASE: smart_iv_pole
-      MYSQL_USER: smart_iv_user
-      MYSQL_PASSWORD: smart_iv_pass_2024
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
@@ -43,10 +43,10 @@ services:
   #   ports:
   #     - "8081:8081"
   #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/smart_iv_pole
-  #     SPRING_DATASOURCE_USERNAME: smart_iv_user
-  #     SPRING_DATASOURCE_PASSWORD: smart_iv_pass_2024
-  #     MQTT_BROKER_URL: tcp://mosquitto:1883
+  #     SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+  #     SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+  #     SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+  #     MQTT_BROKER_URL: ${MQTT_BROKER_URL}
   #   depends_on:
   #     - mariadb
   #     - mosquitto

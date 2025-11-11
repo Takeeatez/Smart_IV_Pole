@@ -17,4 +17,7 @@ public interface PatientRepository extends JpaRepository<Patient, Integer> {
 
     @Query("SELECT p FROM Patient p WHERE p.name LIKE %:keyword% OR p.phone LIKE %:keyword%")
     List<Patient> findByKeyword(@Param("keyword") String keyword);
+
+    // 모바일 앱 로그인용 - 전화번호로 환자 검색
+    java.util.Optional<Patient> findByPhone(String phone);
 }

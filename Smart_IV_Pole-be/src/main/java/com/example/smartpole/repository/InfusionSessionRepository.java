@@ -42,4 +42,7 @@ public interface InfusionSessionRepository extends JpaRepository<InfusionSession
     // Warning sessions (10-30% remaining)
     @Query("SELECT s FROM InfusionSession s WHERE s.status = 'ACTIVE' AND (s.remainingVolume * 100.0 / s.totalVolumeMl) BETWEEN 10 AND 30")
     List<InfusionSession> findWarningSessions();
+
+    // Delete sessions by patient ID (for cascade deletion)
+    void deleteByPatientId(Integer patientId);
 }
