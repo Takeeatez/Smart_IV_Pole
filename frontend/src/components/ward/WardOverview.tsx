@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, Wifi, WifiOff, Activity, Users, AlertTriangle, Bed, UserCheck, UserPlus, CheckCircle, FileText, ArrowRight, Pill } from 'lucide-react';
 import { useWardStore } from '../../stores/wardStore';
 import { Patient } from '../../types';
-import { useMQTT } from '../../hooks/useMQTT';
+import { useWebSocket } from '../../hooks/useWebSocket';
 import BedCard from './BedCard';
 import PatientModal from '../patient/PatientModal';
 import DrugPrescriptionModal from '../patient/DrugPrescriptionModal';
@@ -22,10 +22,11 @@ const WardOverview: React.FC = () => {
     getActiveAlerts,
     getCriticalAlerts,
     fetchPatients,
-    fetchAlerts
+    fetchAlerts,
+    checkConnection
   } = useWardStore();
 
-  const { isConnected, connectionStatus } = useMQTT();
+  const { isConnected, connectionStatus } = useWebSocket({ debug: false });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [selectedBedNumber, setSelectedBedNumber] = useState('');
@@ -41,25 +42,34 @@ const WardOverview: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // ✅ 서버 연결 확인 및 초기 데이터 로드
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
+
   // ✅ RESTORED: 환자 데이터 자동 새로고침 (localStorage 처방 데이터는 wardStore에서 보존)
   useEffect(() => {
     fetchPatients();
   }, [fetchPatients]);
 
-  // 🔔 실시간 데이터 폴링 (10초마다 환자 데이터 + 알림 자동 새로고침)
-  // ESP32가 이벤트 기반 전송을 하므로 DB 변경 시에만 새 데이터 수신
+  // 🔔 WebSocket 실시간 업데이트 + 백업 폴링 (30초)
+  // WebSocket이 실시간 데이터를 받지만, 연결 끊김 대비 백업 폴링 유지
   useEffect(() => {
     // 초기 알림 로드
     fetchAlerts();
 
-    // 10초마다 환자 데이터 + 알림 폴링 (이벤트 발생 시에만 변경됨)
+    // 30초마다 백업 폴링 (WebSocket 연결 끊김 대비)
     const pollingInterval = setInterval(() => {
-      fetchPatients();  // ESP32 이벤트 전송 시 DB 업데이트 반영
-      fetchAlerts();    // 새 알림 확인
-    }, 10000);  // 10초 간격
+      if (!isConnected) {
+        // WebSocket 끊김 시에만 폴링으로 데이터 갱신
+        console.log('⚠️ WebSocket 끊김 - 폴링으로 데이터 갱신');
+        fetchPatients();
+        fetchAlerts();
+      }
+    }, 30000);  // 30초 간격
 
     return () => clearInterval(pollingInterval);
-  }, [fetchPatients, fetchAlerts]);
+  }, [fetchPatients, fetchAlerts, isConnected]);
 
   const activeAlerts = getActiveAlerts();
   const criticalAlerts = getCriticalAlerts();

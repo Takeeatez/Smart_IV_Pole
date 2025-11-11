@@ -38,6 +38,7 @@ export interface Patient {
   weight?: number; // kg
   height?: number; // cm
   allergies?: string[];
+  poleId?: string; // 연결된 폴대 ID (선택적)
   currentPrescription?: IVPrescription;
   prescriptionHistory: IVPrescription[]; // 투여 이력 추가
   medicalHistory?: string[];

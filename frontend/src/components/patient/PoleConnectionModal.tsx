@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Radio, Battery, Wifi, AlertCircle, CheckCircle } from 'lucide-react';
+import { X, Radio, Battery, Wifi, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { useWardStore } from '../../stores/wardStore';
 
 interface Pole {
@@ -26,11 +26,13 @@ const PoleConnectionModal: React.FC<PoleConnectionModalProps> = ({
   patientName,
   currentPoleId
 }) => {
-  const { connectPoleToPatient, disconnectPoleFromPatient } = useWardStore();
+  const { connectPoleToPatient, disconnectPoleFromPatient, sendPrescriptionToESP, patients } = useWardStore();
   const [onlinePoles, setOnlinePoles] = useState<Pole[]>([]);
   const [selectedPoleId, setSelectedPoleId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
+  const [prescriptionStatus, setPrescriptionStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [prescriptionMessage, setPrescriptionMessage] = useState<string>('');
 
   // 온라인 폴대 목록 불러오기
   useEffect(() => {
@@ -102,6 +104,38 @@ const PoleConnectionModal: React.FC<PoleConnectionModalProps> = ({
     }
   };
 
+  const handleSendPrescription = async () => {
+    setPrescriptionStatus('sending');
+    setPrescriptionMessage('');
+
+    try {
+      const result = await sendPrescriptionToESP(patientId);
+      setPrescriptionStatus('success');
+      setPrescriptionMessage('처방 정보가 ESP8266으로 전송되었습니다');
+      console.log('처방 전송 성공:', result);
+
+      // 3초 후 상태 초기화
+      setTimeout(() => {
+        setPrescriptionStatus('idle');
+        setPrescriptionMessage('');
+      }, 3000);
+    } catch (err: any) {
+      setPrescriptionStatus('error');
+      setPrescriptionMessage(err.message || '처방 정보 전송 실패');
+      console.error('처방 전송 실패:', err);
+
+      // 5초 후 상태 초기화
+      setTimeout(() => {
+        setPrescriptionStatus('idle');
+        setPrescriptionMessage('');
+      }, 5000);
+    }
+  };
+
+  // 현재 환자가 처방을 가지고 있는지 확인
+  const patient = patients.find(p => p.id === patientId);
+  const hasPrescription = patient?.currentPrescription != null;
+
   const getBatteryColor = (level: number) => {
     if (level >= 70) return 'text-green-600';
     if (level >= 30) return 'text-yellow-600';
@@ -150,7 +184,7 @@ const PoleConnectionModal: React.FC<PoleConnectionModalProps> = ({
         <div className="p-6">
           {/* 현재 연결된 폴대 정보 */}
           {currentPoleId && (
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-blue-600" />
@@ -166,6 +200,48 @@ const PoleConnectionModal: React.FC<PoleConnectionModalProps> = ({
                 >
                   연결 해제
                 </button>
+              </div>
+
+              {/* 처방 정보 전송 섹션 */}
+              <div className="pt-3 border-t border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium text-gray-900">처방 정보 상태</div>
+                      {hasPrescription ? (
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">
+                          처방 있음
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded">
+                          처방 없음
+                        </span>
+                      )}
+                    </div>
+                    {prescriptionMessage && (
+                      <div className={`mt-2 text-sm ${
+                        prescriptionStatus === 'success' ? 'text-green-700' :
+                        prescriptionStatus === 'error' ? 'text-red-700' :
+                        'text-gray-600'
+                      }`}>
+                        {prescriptionMessage}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleSendPrescription}
+                    disabled={!hasPrescription || prescriptionStatus === 'sending'}
+                    className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${prescriptionStatus === 'sending' ? 'animate-spin' : ''}`} />
+                    {prescriptionStatus === 'sending' ? '전송 중...' : '처방 전송'}
+                  </button>
+                </div>
+                {!hasPrescription && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    환자에게 먼저 처방을 등록해주세요
+                  </div>
+                )}
               </div>
             </div>
           )}

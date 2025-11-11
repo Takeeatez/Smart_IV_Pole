@@ -101,8 +101,11 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
   };
 
   const subscribeToTopics = (client: Client) => {
-    // 모든 Pole 데이터 구독 (와일드카드)
-    client.subscribe('/topic/pole/*', (message: IMessage) => {
+    // 개별 Pole 데이터는 wardStore의 poles 배열을 기반으로 동적 구독
+    // 대신 백엔드가 브로드캐스트하는 통합 토픽을 구독
+
+    // 모든 환자 데이터 구독 (백엔드가 /topic/patient/{id}로 브로드캐스트)
+    client.subscribe('/topic/patients', (message: IMessage) => {
       handlePoleDataMessage(message);
     });
 
@@ -111,7 +114,7 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
       handleAlertMessage(message);
     });
 
-    console.log('📡 Subscribed to WebSocket topics');
+    console.log('📡 Subscribed to WebSocket topics: /topic/patients, /topic/alerts');
   };
 
   const handlePoleDataMessage = (message: IMessage) => {
@@ -122,15 +125,28 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
         console.log('📊 Pole Data Received:', data);
       }
 
+      // ✅ 배터리 업데이트 메시지 처리
+      if (data.type === 'battery_update') {
+        updatePoleData(data.device_id, {
+          battery: data.battery_level,
+          status: data.is_online ? 'online' : 'offline',
+          lastUpdate: new Date(data.timestamp),
+        });
+        return;
+      }
+
+      // 일반 pole 데이터 처리
       const {
         device_id,
         patient_id,
         session_id,
-        weight,
-        predicted_time,
+        current_weight,
+        flow_rate_measured,
+        flow_rate_prescribed,
         remaining_volume,
         percentage,
         state,
+        remaining_time_sec,
         timestamp
       } = data;
 
@@ -138,11 +154,13 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
       updatePoleData(device_id, {
         poleId: device_id,
         patientId: `P${patient_id}`, // Include patientId for bed matching
-        weight: weight,
+        weight: current_weight,
         currentVolume: remaining_volume,
         percentage: percentage,
+        flowRate: flow_rate_measured,              // ✅ 투여 속도 (측정값)
+        prescribedRate: flow_rate_prescribed,      // ✅ 투여 속도 (처방값)
         status: state === 'STABLE' ? 'online' : 'error',
-        estimatedTime: predicted_time / 60, // Convert seconds to minutes
+        estimatedTime: remaining_time_sec ? remaining_time_sec / 60 : 0, // Convert seconds to minutes
         lastUpdate: new Date(timestamp),
       });
 

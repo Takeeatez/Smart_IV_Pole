@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X, Radio } from 'lucide-react';
+import { Search, Filter, Eye, Edit, UserPlus, ArrowLeft, Droplet, Battery, Clock, Trash2, AlertCircle, X, Radio, Send } from 'lucide-react';
 import { useWardStore } from '../stores/wardStore';
 import { calculateProgress, calculateRemainingTime } from '../utils/gttCalculator';
 import PatientModal from '../components/patient/PatientModal';
@@ -25,7 +25,7 @@ const PatientList: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showFilters, setShowFilters] = useState(false);
 
-  const { patients, beds, removePatient, fetchPatients } = useWardStore();
+  const { patients, beds, removePatient, fetchPatients, sendPrescriptionToESP } = useWardStore();
 
   // ✅ RESTORED: 환자 데이터 자동 새로고침 (localStorage 처방 데이터는 wardStore에서 보존)
   useEffect(() => {
@@ -228,6 +228,15 @@ const PatientList: React.FC = () => {
 
   const getPoleConnectionPatient = () => {
     return poleConnectionPatient ? patients.find(p => p.id === poleConnectionPatient) : null;
+  };
+
+  const handleSendPrescription = async (patientId: string) => {
+    try {
+      await sendPrescriptionToESP(patientId);
+      alert('처방 정보가 ESP8266으로 전송되었습니다');
+    } catch (err: any) {
+      alert(err.message || '처방 정보 전송 실패');
+    }
   };
 
   return (
@@ -517,6 +526,15 @@ const PatientList: React.FC = () => {
                             >
                               <Radio className="w-4 h-4" />
                             </button>
+                            {patient.poleId && patient.currentPrescription && (
+                              <button
+                                onClick={() => handleSendPrescription(patient.id)}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="처방 정보 ESP8266으로 전송"
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeletePatient(patient.id)}
                               className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"

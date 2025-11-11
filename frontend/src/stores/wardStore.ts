@@ -25,7 +25,6 @@ interface WardStore {
   removeAlert: (alertId: string) => void;
   setSelectedPatient: (patientId: string | null) => void;
   updateWardStats: () => void;
-  initializeMockData: () => void;
   loadStoredData: () => boolean;
   saveToStorage: () => void;
   
@@ -366,10 +365,22 @@ export const useWardStore = create<WardStore>((set, get) => ({
       // 서버 연결 성공 시 백엔드 데이터 로드
       await get().fetchPatients();
     } else {
-      // 서버 연결 실패 시 저장된 데이터나 목업 데이터 사용
-      if (!get().loadStoredData()) {
-        get().initializeMockData();
-      }
+      // 서버 연결 실패 시 빈 상태로 초기화
+      console.warn('⚠️ 서버 연결 실패 - 빈 상태로 초기화');
+      set({
+        patients: [],
+        beds: [
+          { bedNumber: '301A-1', room: '301A', status: 'empty' },
+          { bedNumber: '301A-2', room: '301A', status: 'empty' },
+          { bedNumber: '301A-3', room: '301A', status: 'empty' },
+          { bedNumber: '301A-4', room: '301A', status: 'empty' },
+          { bedNumber: '301A-5', room: '301A', status: 'empty' },
+          { bedNumber: '301A-6', room: '301A', status: 'empty' }
+        ],
+        alerts: [],
+        poleData: new Map(),
+        patientBedMapping: new Map()
+      });
     }
   },
 
@@ -551,8 +562,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
     } catch (error) {
       console.error('❌ [TIMING] fetchPatients 오류 발생:', error);
       set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
-      // 오류 시 목업 데이터 사용
-      get().initializeMockData();
+      // 오류 시 서버 연결 상태를 false로 설정
+      set({ isServerConnected: false });
     }
   },
 
@@ -828,10 +839,13 @@ export const useWardStore = create<WardStore>((set, get) => ({
       // Save to localStorage
       get().saveToStorage();
 
-      // 🔥 REMOVED: fetchPatients() call after patient removal
-      // Reason: Can overwrite localStorage prescription data with empty DB data
-      // The local state update above is sufficient for UI consistency
-      // Manual refresh by user will sync with DB if needed
+      // ✅ RESTORED: fetchPatients() after patient deletion to sync with DB
+      // Note: This is safe for deletion (unlike prescription updates)
+      // Deletion removes entire patient record, so no data overwrite issues
+      console.log(`🔄 [DELETE] Syncing with backend after patient ${patientId} deletion`);
+      if (get().isServerConnected) {
+        await get().fetchPatients();
+      }
     } catch (error) {
       console.error('Failed to remove patient:', error);
       set({ error: error instanceof Error ? error.message : 'Unknown error', isLoading: false });
@@ -1173,39 +1187,6 @@ export const useWardStore = create<WardStore>((set, get) => ({
   saveToStorage: () => {
     const { patients, beds, alerts, poleData, patientBedMapping } = get();
     storageService.saveWardState(patients, beds, alerts, poleData, patientBedMapping);
-  },
-
-  // Initialize empty data for clean startup
-  initializeMockData: () => {
-    // 기존 localStorage 데이터 완전 삭제 (목업 데이터 잔여물 제거)
-    localStorage.removeItem('wardState');
-    localStorage.removeItem('wardPatients');
-    localStorage.removeItem('wardBeds');
-    localStorage.removeItem('wardAlerts');
-    localStorage.removeItem('wardPoleData');
-
-    // 빈 데이터로 초기화 - 301A 병실 6개 침대
-    const emptyBeds: BedInfo[] = [
-      { bedNumber: '301A-1', room: '301A', status: 'empty' },
-      { bedNumber: '301A-2', room: '301A', status: 'empty' },
-      { bedNumber: '301A-3', room: '301A', status: 'empty' },
-      { bedNumber: '301A-4', room: '301A', status: 'empty' },
-      { bedNumber: '301A-5', room: '301A', status: 'empty' },
-      { bedNumber: '301A-6', room: '301A', status: 'empty' }
-    ];
-
-    set({
-      patients: [], // 빈 환자 배열
-      beds: emptyBeds, // 빈 침대만
-      alerts: [], // 빈 알림 배열
-      poleData: new Map(), // 빈 폴대 데이터
-      patientBedMapping: new Map() // 빈 환자-침대 매핑
-    });
-
-    // Calculate initial ward stats (모두 0)
-    get().updateWardStats();
-
-    console.log('✅ 목업 데이터 완전 제거됨 - 깨끗한 초기 상태');
   },
 
   // 🔄 NEW: Real-time sync callback system for PatientDetail
@@ -1551,6 +1532,53 @@ export const useWardStore = create<WardStore>((set, get) => ({
       }
     } catch (error) {
       console.error('❌ [connectPole] Error connecting pole:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Send prescription to ESP8266 manually
+   */
+  sendPrescriptionToESP: async (patientId: string) => {
+    const { isServerConnected, patients } = get();
+
+    if (!isServerConnected) {
+      throw new Error('서버에 연결되어 있지 않습니다');
+    }
+
+    try {
+      console.log(`📤 [sendPrescription] Sending prescription for patient ${patientId}`);
+
+      // Find patient and verify pole connection
+      const patient = patients.find(p => p.id === patientId);
+      if (!patient) {
+        throw new Error('환자를 찾을 수 없습니다');
+      }
+
+      if (!patient.poleId) {
+        throw new Error('폴대가 연결되어 있지 않습니다');
+      }
+
+      const response = await fetch(
+        `http://localhost:8081/api/v1/poles/${patient.poleId}/send-prescription`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || '처방 정보 전송 실패');
+      }
+
+      const result = await response.json();
+      console.log(`✅ [sendPrescription] Successfully sent prescription to ESP8266:`, result);
+      return result;
+    } catch (error) {
+      console.error('❌ [sendPrescription] Error sending prescription:', error);
       throw error;
     }
   },

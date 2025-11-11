@@ -22,8 +22,8 @@ public interface PrescriptionRepository extends JpaRepository<Prescription, Inte
     // Find prescriptions by status
     List<Prescription> findByStatus(Prescription.PrescriptionStatus status);
 
-    // Find active prescriptions for a patient
-    @Query("SELECT p FROM Prescription p WHERE p.patientId = :patientId AND p.status = 'ACTIVE'")
+    // Find active prescriptions for a patient (includes PRESCRIBED and ACTIVE status)
+    @Query("SELECT p FROM Prescription p WHERE p.patientId = :patientId AND (p.status = 'ACTIVE' OR p.status = 'PRESCRIBED') ORDER BY p.prescribedAt DESC")
     List<Prescription> findActiveByPatientId(@Param("patientId") Integer patientId);
 
     // Find prescribed (not yet started) prescriptions

@@ -1,5 +1,7 @@
 package com.example.smartpole.service;
 
+import com.example.smartpole.entity.InfusionSession;
+import com.example.smartpole.entity.Pole;
 import com.example.smartpole.entity.Prescription;
 import com.example.smartpole.repository.PrescriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +18,8 @@ import java.util.Optional;
 public class PrescriptionService {
 
     private final PrescriptionRepository prescriptionRepository;
+    private final InfusionSessionService infusionSessionService;
+    private final PoleService poleService;
 
     public List<Prescription> getAllPrescriptions() {
         return prescriptionRepository.findAll();
@@ -56,6 +60,8 @@ public class PrescriptionService {
 
     @Transactional
     public Prescription createPrescription(Prescription prescription) {
+        System.out.println("\n[PRESCRIPTION-CREATE] 처방 생성 시작 - Patient ID: " + prescription.getPatientId());
+
         // Validate required fields
         validatePrescription(prescription);
 
@@ -64,6 +70,7 @@ public class PrescriptionService {
         for (Prescription existing : existingPrescriptions) {
             if (existing.getStatus() == Prescription.PrescriptionStatus.ACTIVE ||
                 existing.getStatus() == Prescription.PrescriptionStatus.PRESCRIBED) {
+                System.out.println("[PRESCRIPTION-CREATE] 기존 처방 완료 처리: Prescription ID " + existing.getId());
                 existing.setStatus(Prescription.PrescriptionStatus.COMPLETED);
                 existing.setCompletedAt(LocalDateTime.now());
                 prescriptionRepository.save(existing);
@@ -78,7 +85,62 @@ public class PrescriptionService {
             prescription.setStatus(Prescription.PrescriptionStatus.PRESCRIBED);
         }
 
-        return prescriptionRepository.save(prescription);
+        Prescription savedPrescription = prescriptionRepository.save(prescription);
+        System.out.println("[PRESCRIPTION-CREATE] ✅ 처방 저장 완료 - Prescription ID: " + savedPrescription.getId());
+
+        // ✨ AUTO-CREATE InfusionSession if patient has a pole connected
+        Optional<Pole> activePole = poleService.getActivePoleByPatient(prescription.getPatientId());
+        if (activePole.isPresent()) {
+            String poleId = activePole.get().getPoleId();
+            System.out.println("[PRESCRIPTION-CREATE] 환자에게 폴대 연결됨 - Pole ID: " + poleId);
+            System.out.println("[PRESCRIPTION-CREATE] InfusionSession 자동 생성 중...");
+
+            try {
+                // End any existing active sessions for this patient
+                Optional<InfusionSession> existingSession = infusionSessionService.getActiveSessionByPatient(prescription.getPatientId());
+                if (existingSession.isPresent()) {
+                    System.out.println("[PRESCRIPTION-CREATE] 기존 활성 세션 종료 - Session ID: " + existingSession.get().getSessionId());
+                    infusionSessionService.endInfusion(existingSession.get().getSessionId());
+                }
+
+                // Create new InfusionSession
+                InfusionSession session = new InfusionSession();
+                session.setPatientId(prescription.getPatientId());
+                session.setPrescriptionId(savedPrescription.getId());
+                session.setDripId(prescription.getDrugTypeId());
+                session.setIvPoleId(poleId);
+                session.setTotalVolumeMl(prescription.getTotalVolumeMl());
+                session.setRemainingVolume(prescription.getTotalVolumeMl());
+                session.setFlowRate(new java.math.BigDecimal(prescription.getInfusionRateMlHr()));
+
+                // Calculate expected end time
+                double durationHours = prescription.getDurationHours();
+                LocalDateTime expectedEndTime = LocalDateTime.now().plusMinutes((long)(durationHours * 60));
+                session.setEndExpTime(expectedEndTime);
+
+                session.setStartTime(LocalDateTime.now());
+                session.setStatus(InfusionSession.SessionStatus.ACTIVE);
+
+                InfusionSession savedSession = infusionSessionService.createSession(session);
+                System.out.println("[PRESCRIPTION-CREATE] ✅ InfusionSession 생성 완료 - Session ID: " + savedSession.getSessionId());
+                System.out.println("[PRESCRIPTION-CREATE]    - Pole ID: " + poleId);
+                System.out.println("[PRESCRIPTION-CREATE]    - Total Volume: " + savedSession.getTotalVolumeMl() + " mL");
+                System.out.println("[PRESCRIPTION-CREATE]    - Flow Rate: " + savedSession.getFlowRate() + " mL/hr");
+                System.out.println("[PRESCRIPTION-CREATE]    - Expected End: " + expectedEndTime);
+                System.out.println("[PRESCRIPTION-CREATE] 💡 ESP8266이 이제 /api/esp/init 엔드포인트로 처방 정보를 받을 수 있습니다");
+
+            } catch (Exception e) {
+                System.err.println("[PRESCRIPTION-CREATE] ⚠️ InfusionSession 생성 실패 (처방은 저장됨): " + e.getMessage());
+                e.printStackTrace();
+                // Don't throw exception - prescription was saved successfully
+                // Nurse can manually start infusion later
+            }
+        } else {
+            System.out.println("[PRESCRIPTION-CREATE] ℹ️ 환자에게 연결된 폴대 없음 - InfusionSession 생성 건너뜀");
+            System.out.println("[PRESCRIPTION-CREATE] 💡 간호사가 폴대를 연결하면 InfusionSession이 생성됩니다");
+        }
+
+        return savedPrescription;
     }
 
     @Transactional

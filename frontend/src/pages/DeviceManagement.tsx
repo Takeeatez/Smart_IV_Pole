@@ -55,12 +55,12 @@ const DeviceManagement: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
-  // 백엔드에서 실제 폴대 데이터 가져오기
+  // 백엔드에서 실제 폴대 데이터 가져오기 (온라인 폴대만)
   useEffect(() => {
     const fetchPoles = async () => {
       setLoading(true);
       try {
-        const response = await fetch('http://localhost:8081/api/v1/poles');
+        const response = await fetch('http://localhost:8081/api/v1/poles/online');
 
         if (response.ok) {
           const backendPoles = await response.json();
@@ -73,15 +73,15 @@ const DeviceManagement: React.FC = () => {
             status: pole.isOnline ? 'online' : 'offline',
             batteryLevel: pole.batteryLevel || 0,
             location: {
-              room: pole.patientId ? '병실' : '대기중',
+              room: pole.patient ? `병실 (${pole.patient.name})` : '대기중',
               bedNumber: pole.patientId ? undefined : undefined
             },
             lastSeen: pole.lastPingAt ? new Date(pole.lastPingAt) : new Date(),
             firmwareVersion: '2.1.3', // 고정값 (추후 백엔드에서 제공)
             isAssigned: !!pole.patientId,
-            currentPatient: pole.patientId ? {
-              id: pole.patientId.toString(),
-              name: '환자' // 실제로는 환자 정보 조인 필요
+            currentPatient: pole.patient ? {
+              id: pole.patient.patientId.toString(),
+              name: pole.patient.name
             } : undefined,
             hardware: {
               model: 'ESP8266',
@@ -98,13 +98,13 @@ const DeviceManagement: React.FC = () => {
           }));
 
           setPoles(convertedPoles);
-          console.log('✅ 폴대 목록 로드 완료:', convertedPoles.length, '개');
+          console.log('[Device Management] Loaded poles:', convertedPoles.length);
         } else {
-          console.error('❌ 폴대 목록 로드 실패:', response.statusText);
+          console.error('[Device Management] Failed to load poles:', response.statusText);
           setPoles([]);
         }
       } catch (error) {
-        console.error('❌ 폴대 목록 로드 중 오류:', error);
+        console.error('[Device Management] Error loading poles:', error);
         setPoles([]);
       } finally {
         setLoading(false);
@@ -199,7 +199,7 @@ const DeviceManagement: React.FC = () => {
               실시간 폴대 상태 모니터링 (ESP8266 자동 등록)
             </p>
             <p className="text-sm text-gray-500 mt-1">
-              💡 폴대가 핑을 보내면 자동으로 등록됩니다
+              폴대가 핑을 보내면 자동으로 등록됩니다
             </p>
           </div>
 
@@ -272,6 +272,34 @@ const DeviceManagement: React.FC = () => {
             </select>
           </div>
         </div>
+
+        {/* Empty State */}
+        {filteredPoles.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Activity className="w-16 h-16 text-gray-300 mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {poles.length === 0 ? 'ESP8266 핑 대기 중' : '검색 결과 없음'}
+            </h3>
+            <p className="text-gray-500 mb-4">
+              {poles.length === 0
+                ? 'ESP8266이 30초마다 핑을 보내면 자동으로 여기에 표시됩니다.'
+                : '검색 조건을 변경해보세요.'}
+            </p>
+            {poles.length === 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md">
+                <p className="text-sm text-blue-800 mb-2">
+                  <strong>확인 사항:</strong>
+                </p>
+                <ul className="text-sm text-blue-700 text-left space-y-1">
+                  <li>1. ESP8266이 WiFi에 연결되었는지 확인</li>
+                  <li>2. config.h의 서버 IP가 올바른지 확인</li>
+                  <li>3. 백엔드 서버가 8081 포트에서 실행 중인지 확인</li>
+                  <li>4. 시리얼 모니터에서 "[PING] Success" 메시지 확인</li>
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Pole Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">

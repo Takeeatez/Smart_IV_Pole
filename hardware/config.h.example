@@ -1,9 +1,25 @@
 // WiFi Configuration
-// Copy this file to config.h and fill in your credentials
+// ⚠️ Copy this file to config.h and fill in your credentials
+// ⚠️ DO NOT COMMIT config.h TO GIT - Contains sensitive credentials
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
 // Server Configuration
-const char* serverHost = "192.168.1.100";  // Your server IP or domain
+// 주의: ESP8266과 서버가 같은 네트워크에 있어야 합니다
+//
+// 로컬 개발 환경:
+//   - Windows: cmd > ipconfig > IPv4 주소 확인
+//   - Mac/Linux: terminal > ifconfig > inet 주소 확인
+//   - 예시: "192.168.0.100" (서버 PC의 로컬 IP)
+//
+// AWS 배포 환경:
+//   - EC2 퍼블릭 IP 또는 도메인 사용
+//   - 예시: "3.35.123.456" 또는 "api.yourdomain.com"
+//
+// 참고:
+//   - ESP8266은 고유 MAC 주소 기반 ID를 자동 생성합니다 (예: IV_POLE_AABBCCDD)
+//   - 30초마다 /api/esp/ping 엔드포인트로 핑 전송
+//   - 백엔드에서 자동으로 폴대 등록 및 온라인 상태 관리
+const char* serverHost = "192.168.1.100";  // 서버 PC의 실제 IP로 변경 필요
 const uint16_t serverPort = 8081;
 const char* serverPath = "/api/esp/data";

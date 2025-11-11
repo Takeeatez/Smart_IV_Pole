@@ -30,7 +30,20 @@
       "Bash(chmod:*)",
       "Bash(git add:*)",
       "Bash(git merge:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(mysql:*)",
+      "Bash(pkill:*)",
+      "Read(//Users/ayaan/Documents/Arduino/libraries/**)",
+      "Bash(for i in {1..15})",
+      "Bash(do)",
+      "Bash(if curl -s http://localhost:8081/api/v1/patients)",
+      "Bash(/dev/null)",
+      "Bash(then)",
+      "Bash(break)",
+      "Bash(fi)",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Read(//private/tmp/**)"
     ],
     "deny": [],
     "ask": []

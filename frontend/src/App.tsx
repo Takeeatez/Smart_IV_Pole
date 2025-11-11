@@ -10,7 +10,7 @@ import { useWardStore } from './stores/wardStore'
 import { useWebSocket } from './hooks/useWebSocket'
 
 function App() {
-  const { checkConnection, loadStoredData, initializeMockData } = useWardStore()
+  const { checkConnection, loadStoredData } = useWardStore()
   const [isInitialized, setIsInitialized] = useState(false)
 
   // Real-time WebSocket connection for ESP8266 hardware integration
@@ -51,7 +51,8 @@ function App() {
           localStorage.removeItem('smart_iv_pole_pole_data')
           // 매핑 데이터는 삭제하지 않음: smart_iv_pole_patient_bed_mapping 보존
 
-          initializeMockData()
+          // Mock 데이터 초기화 제거됨 - 백엔드 데이터만 사용
+          console.log('✅ 침대 구성 초기화 완료 (백엔드 데이터 사용)')
 
           // 🔄 매핑 데이터 복원 및 즉시 저장
           useWardStore.setState({ patientBedMapping: savedMapping })

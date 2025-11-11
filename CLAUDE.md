@@ -97,13 +97,45 @@ The **GTT (점적 수) calculation system** is the core differentiator that brid
 
 - **Primary Input**: Nurse manual entry for medication volume, duration, and GTT factor
 - **Formula**: `(총 용량 × GTT factor) / 투여 시간(분)` where GTT factor is 20 (macro) or 60 (micro)
-- **Real-time Monitoring**: ESP32 load cell data provides accuracy verification
+- **Real-time Monitoring**: ESP8266 load cell data provides accuracy verification
 - **Status Algorithm**: Compare expected vs. actual depletion rates:
   - **정상 (Normal)**: Actual rate within ±10% of calculated rate
   - **주의 (Warning)**: 10-20% deviation from expected rate
   - **응급 (Critical)**: >20% deviation - major discrepancy requiring immediate attention
 
 Located in `frontend/src/utils/gttCalculator.ts` with medical-grade precision.
+
+### ESP8266 Intelligent Monitoring System
+
+**Event-Driven Architecture** - Traffic optimization through local monitoring:
+
+1. **Prescription Retrieval** (`/api/esp/init?device_id={id}`)
+   - ESP8266 fetches prescription data when connected to patient pole
+   - Receives: total_volume_ml, flow_rate_ml_min, gtt_factor
+
+2. **High-Precision Local Monitoring**
+   - **Measurement**: 1-second interval, 0.1g precision
+   - **Flow Rate Calculation**: 60-second moving average (60 samples)
+   - **Real-time Prediction**: Estimated end time updated every second
+   - **Serial Monitor Output**: Continuous developer-friendly logging
+
+3. **Event-Based Backend Communication** (Traffic Optimization)
+   - **Normal Operation**: No transmission (ESP monitors locally)
+   - **Initial Data**: Single transmission after 60 seconds
+   - **Deviation Alert**: ≥15% flow rate deviation → backend alert
+   - **Critical Alert**: ≥25% deviation or <10% remaining volume
+   - **Minimum Interval**: 5 seconds between transmissions
+
+4. **Serial Monitor Output Format** (Arduino IDE)
+   ```
+   [60s] 무게: 497.2g (잔량: 497.2g, 99.4%) | 유속: 2.80 mL/분 (처방: 2.78, 편차: +0.7%) | 예상완료: 177분 후
+   ```
+
+**Benefits**:
+- ✅ Network traffic reduction: 3-second polling → event-based (99% reduction)
+- ✅ Battery optimization: Minimal HTTP requests
+- ✅ Real-time accuracy: 60-second moving average eliminates noise
+- ✅ Developer monitoring: Complete visibility via Serial Monitor
 
 ## Critical Architecture Patterns
 

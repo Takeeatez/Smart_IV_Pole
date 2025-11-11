@@ -146,13 +146,23 @@ const BedCard: React.FC<BedCardProps> = ({ bed, onClick }) => {
               </div>
             </div>
 
-            {/* Flow Rate */}
+            {/* Flow Rate - 투여 속도 (측정값 vs 처방값) */}
             <div className="mb-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-600">유량</span>
-                <span className="text-xs font-medium text-gray-800">
-                  {Math.round(bed.poleData.flowRate)} mL/h
-                </span>
+                <div className="flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-gray-500" />
+                  <span className="text-xs text-gray-600">투여속도</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-medium text-gray-800">
+                    {bed.poleData.flowRate ? bed.poleData.flowRate.toFixed(1) : '-'} mL/min
+                  </span>
+                  {bed.poleData.prescribedRate && (
+                    <span className="text-xs text-gray-500">
+                      / {bed.poleData.prescribedRate.toFixed(1)}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

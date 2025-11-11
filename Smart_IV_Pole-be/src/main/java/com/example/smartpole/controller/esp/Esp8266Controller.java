@@ -136,6 +136,8 @@ public class Esp8266Controller {
             // 전체 클라이언트에게 브로드캐스트
             messagingTemplate.convertAndSend("/topic/pole/" + deviceId, wsMessage);
             messagingTemplate.convertAndSend("/topic/patient/" + session.getPatientId(), wsMessage);
+            // 통합 환자 데이터 토픽 (프론트엔드가 단일 토픽 구독)
+            messagingTemplate.convertAndSend("/topic/patients", wsMessage);
 
             System.out.println("✅ 데이터 업데이트 및 브로드캐스트 완료");
 
@@ -226,6 +228,7 @@ public class Esp8266Controller {
     /**
      * ESP8266 초기화 - 처방 정보 전달
      * ESP8266이 부팅 시 이 엔드포인트를 호출하여 간호사가 입력한 처방 정보를 받음
+     * Fallback: iv_pole_id가 NULL인 경우 Pole 테이블 조회 후 자동 연결
      */
     @GetMapping("/init")
     public Map<String, Object> initializeDevice(@RequestParam String device_id) {
@@ -233,12 +236,34 @@ public class Esp8266Controller {
             System.out.println("=== ESP8266 초기화 요청 ===");
             System.out.println("Device ID: " + device_id);
 
-            // 1. InfusionSession 찾기 (활성화된 세션)
+            // 1차: iv_pole_id로 InfusionSession 찾기 (활성화된 세션)
             Optional<InfusionSession> sessionOpt = infusionSessionService.getActiveSessionByPole(device_id);
 
+            // 2차: 실패 시 Pole 테이블에서 patient_id 조회 후 환자의 세션 찾기
             if (sessionOpt.isEmpty()) {
-                System.out.println("⚠️ No active session found for pole: " + device_id);
-                return createResponse("error", "No active session found for this device", null);
+                System.out.println("[ESP INIT] Primary lookup failed - attempting fallback via Pole table");
+
+                Optional<Pole> poleOpt = poleService.getPoleById(device_id);
+                if (poleOpt.isPresent() && poleOpt.get().getPatientId() != null) {
+                    Integer patientId = poleOpt.get().getPatientId();
+                    System.out.println("[ESP INIT] Pole " + device_id + " → Patient " + patientId);
+
+                    sessionOpt = infusionSessionService.getActiveSessionByPatient(patientId);
+
+                    if (sessionOpt.isPresent()) {
+                        // 세션을 찾았으면 iv_pole_id 자동 업데이트 (동기화)
+                        InfusionSession session = sessionOpt.get();
+                        session.setIvPoleId(device_id);
+                        infusionSessionService.createSession(session); // @Transactional save
+                        System.out.println("[ESP INIT] Auto-linked pole to session - Session " + session.getSessionId() + " → Pole " + device_id);
+                    } else {
+                        System.out.println("⚠️ No active session found for patient " + patientId);
+                        return createResponse("error", "No active session found for patient " + patientId, null);
+                    }
+                } else {
+                    System.out.println("⚠️ Pole not found or not assigned to any patient: " + device_id);
+                    return createResponse("error", "No active session found for this device", null);
+                }
             }
 
             InfusionSession session = sessionOpt.get();
@@ -309,15 +334,13 @@ public class Esp8266Controller {
             String deviceId = (String) data.get("device_id");
             Integer batteryLevel = parseInteger(data.get("battery_level"));
 
-            System.out.println("=== ESP8266 핑 수신 ===");
-            System.out.println("Device ID: " + deviceId);
-            System.out.println("Battery Level: " + batteryLevel + "%");
+            System.out.println("[ESP PING] Device: " + deviceId + " | Battery: " + batteryLevel + "%");
 
             // 1. Pole 찾기 또는 자동 생성
             Pole pole = poleService.getPoleById(deviceId)
                     .orElseGet(() -> {
                         // 폴대가 없으면 자동 생성 (Auto-registration)
-                        System.out.println("📝 새 폴대 자동 등록: " + deviceId);
+                        System.out.println("[INFO] New pole auto-registered: " + deviceId);
                         Pole newPole = new Pole();
                         newPole.setPoleId(deviceId);
                         newPole.setStatus(Pole.PoleStatus.active);
@@ -337,6 +360,8 @@ public class Esp8266Controller {
 
             // 3. WebSocket 브로드캐스트 (폴대 상태 변경)
             Map<String, Object> wsMessage = new HashMap<>();
+            wsMessage.put("type", "battery_update");  // ✅ 메시지 타입 추가
+            wsMessage.put("device_id", deviceId);
             wsMessage.put("pole_id", deviceId);
             wsMessage.put("is_online", true);
             wsMessage.put("battery_level", pole.getBatteryLevel());
@@ -344,13 +369,14 @@ public class Esp8266Controller {
             wsMessage.put("timestamp", LocalDateTime.now().toString());
 
             messagingTemplate.convertAndSend("/topic/poles/status", wsMessage);
+            messagingTemplate.convertAndSend("/topic/patients", wsMessage);  // ✅ 통합 토픽에도 브로드캐스트
 
-            System.out.println("✅ 핑 처리 완료 - 온라인 상태 유지");
+            System.out.println("[ESP PING] Success - Pole online");
 
             return createResponse("success", "Ping received", wsMessage);
 
         } catch (Exception e) {
-            System.err.println("❌ 핑 처리 오류: " + e.getMessage());
+            System.err.println("[ESP PING] Error: " + e.getMessage());
             e.printStackTrace();
             return createResponse("error", "Failed to process ping: " + e.getMessage(), data);
         }

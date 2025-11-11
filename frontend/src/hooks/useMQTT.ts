@@ -24,23 +24,17 @@ export const useMQTT = (config?: MQTTConfig): MQTTHookReturn => {
   const [error, setError] = useState<string | null>(null);
   
   const intervalRef = useRef<number | undefined>(undefined);
-  const { updatePoleData, initializeMockData } = useWardStore();
+  const { updatePoleData } = useWardStore();
 
-  // Initialize static mock data without real-time updates
+  // MQTT connection simulation (목업 데이터 제거됨 - 백엔드 데이터만 사용)
   useEffect(() => {
-    // Initialize mock data
-    initializeMockData();
-    
     // Simulate connection process
     setConnectionStatus('connecting');
-    
+
     const connectTimer = setTimeout(() => {
       setIsConnected(true);
       setConnectionStatus('connected');
-      console.log('🔗 Mock MQTT Connected - Static mode (waiting for database connection)');
-      
-      // Don't start real-time simulation - keep data static
-      // startMockDataSimulation();
+      console.log('🔗 Mock MQTT Connected - Ready for ESP32 hardware integration');
     }, 1000);
 
     return () => {
