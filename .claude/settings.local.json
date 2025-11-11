@@ -24,7 +24,8 @@
       "Bash(xargs kill:*)",
       "Bash(python3:*)",
       "Read(//Users/ayaan/Git/**)",
-      "Bash(npx tailwindcss:*)"
+      "Bash(npx tailwindcss:*)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []
