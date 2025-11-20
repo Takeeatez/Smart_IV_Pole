@@ -28,7 +28,7 @@ public class Prescription {
     private Integer totalVolumeMl;
 
     @Column(name = "infusion_rate_ml_hr", nullable = false)
-    private Integer infusionRateMlHr;
+    private Integer infusionRateMlHr; // 기존 필드 유지 (DB 호환성) - 실제로는 mL/min 저장됨
 
     @Column(name = "gtt_factor", nullable = false)
     private Integer gttFactor; // 20 for macro, 60 for micro

@@ -41,7 +41,7 @@ public class InfusionSession {
     private Integer remainingVolume;
 
     @Column(name = "flow_rate", nullable = false, precision = 6, scale = 2)
-    private BigDecimal flowRate;
+    private BigDecimal flowRate; // mL/min (분당 투여 속도)
 
     @Column(name = "iv_pole_id", nullable = true, length = 20)
     private String ivPoleId;
@@ -55,6 +55,16 @@ public class InfusionSession {
 
     @Column(name = "total_volume_ml", nullable = false)
     private Integer totalVolumeMl;
+
+    // 투여량 추적 (수액팩 무게 보정)
+    @Column(name = "consumed_volume_ml")
+    private Integer consumedVolumeMl = 0;  // 투여된 양 (누적)
+
+    @Column(name = "initial_weight_grams")
+    private Double initialWeightGrams;     // 초기 전체 무게 (수액+팩)
+
+    @Column(name = "baseline_weight_grams")
+    private Double baselineWeightGrams;    // 영점 무게 (빈 폴대)
 
     // Real-time sensor data from ESP8266
     @Column(name = "real_time_weight")

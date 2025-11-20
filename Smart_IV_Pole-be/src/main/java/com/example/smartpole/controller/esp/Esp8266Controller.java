@@ -3,6 +3,8 @@ package com.example.smartpole.controller.esp;
 import com.example.smartpole.entity.AlertLog;
 import com.example.smartpole.entity.InfusionSession;
 import com.example.smartpole.entity.Pole;
+import com.example.smartpole.entity.Prescription;
+import com.example.smartpole.repository.InfusionSessionRepository;
 import com.example.smartpole.service.AlertLogService;
 import com.example.smartpole.service.InfusionSessionService;
 import com.example.smartpole.service.PoleService;
@@ -21,6 +23,7 @@ import java.util.Optional;
 public class Esp8266Controller {
 
     private final InfusionSessionService infusionSessionService;
+    private final InfusionSessionRepository infusionSessionRepository;
     private final AlertLogService alertLogService;
     private final PoleService poleService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -72,10 +75,28 @@ public class Esp8266Controller {
 
             InfusionSession session = sessionOpt.get();
 
-            // 3. InfusionSession 업데이트
-            // 남은 무게(g)를 남은 용량(mL)으로 저장 (1g ≈ 1mL)
-            int remainingVolume = weightRemaining != null ? weightRemaining.intValue() : session.getRemainingVolume();
-            session.setRemainingVolume(remainingVolume);
+            // 3. InfusionSession 업데이트 (수액팩 무게 보정)
+            // 투여량 = 초기 무게 - 현재 무게 (감소량 = 순수 수액량)
+            int consumedVolume = 0;
+            int remainingVolume = session.getTotalVolumeMl();
+
+            if (initialWeight != null && currentWeight != null) {
+                consumedVolume = (int)(initialWeight - currentWeight);
+                remainingVolume = Math.max(0, session.getTotalVolumeMl() - consumedVolume);
+
+                // 무게 정보 저장
+                session.setInitialWeightGrams(initialWeight);
+                session.setBaselineWeightGrams(baselineWeight);
+                session.setConsumedVolumeMl(consumedVolume);
+                session.setRemainingVolume(remainingVolume);
+
+                System.out.println("📊 투여량 계산: " + consumedVolume + "mL (초기 " + initialWeight + "g - 현재 " + currentWeight + "g)");
+                System.out.println("📊 잔량: " + remainingVolume + "mL / " + session.getTotalVolumeMl() + "mL");
+            } else {
+                // 무게 데이터 없으면 기존 방식 유지
+                remainingVolume = weightRemaining != null ? weightRemaining.intValue() : session.getRemainingVolume();
+                session.setRemainingVolume(remainingVolume);
+            }
 
             // 실시간 센서 데이터 업데이트
             session.setRealTimeWeight(currentWeight);
@@ -119,13 +140,13 @@ public class Esp8266Controller {
             wsMessage.put("patient_id", session.getPatientId());
             wsMessage.put("session_id", session.getSessionId());
 
-            // 무게 정보
+            // 무게 정보 (수액팩 무게 보정 적용)
             wsMessage.put("current_weight", currentWeight);
             wsMessage.put("initial_weight", initialWeight);
-            wsMessage.put("weight_consumed", weightConsumed);
-            wsMessage.put("weight_remaining", weightRemaining);
-            wsMessage.put("remaining_volume", remainingVolume);
-            wsMessage.put("percentage", (remainingVolume * 100.0) / session.getTotalVolumeMl());
+            wsMessage.put("consumed_volume", consumedVolume);  // 투여량
+            wsMessage.put("remaining_volume", remainingVolume);  // 잔량
+            double percentage = (double)consumedVolume / session.getTotalVolumeMl() * 100.0;
+            wsMessage.put("percentage", Math.min(100.0, percentage));  // 진행률 (투여량 기준)
 
             // 유속 정보
             wsMessage.put("flow_rate_measured", flowRateMeasured);
@@ -288,15 +309,32 @@ public class Esp8266Controller {
             prescriptionData.put("patient_id", session.getPatientId());
             prescriptionData.put("total_volume_ml", session.getTotalVolumeMl());
 
-            // FlowRate를 mL/min로 변환 (DB는 mL/hr 저장)
-            double flowRateMlPerMin = session.getFlowRate().doubleValue() / 60.0;
+            // FlowRate는 이미 mL/min으로 저장되어 있음 (변환 불필요)
+            double flowRateMlPerMin = session.getFlowRate().doubleValue();
             prescriptionData.put("flow_rate_ml_min", flowRateMlPerMin);
-            prescriptionData.put("flow_rate_ml_hr", session.getFlowRate());
 
-            // Prescription 엔티티에서 GTT 정보 가져오기 (session.getPrescription() 사용)
-            // 현재는 기본값 사용, 추후 Prescription 관계 추가 필요
-            prescriptionData.put("gtt_factor", 20);  // 기본값: macro drip
-            prescriptionData.put("calculated_gtt", (int)(flowRateMlPerMin * 20));  // GTT/min = mL/min * factor
+            // Prescription 엔티티에서 실제 GTT 정보 가져오기
+            Prescription prescription = session.getPrescription();
+            if (prescription != null) {
+                // 간호사가 입력한 실제 GTT 정보 사용
+                prescriptionData.put("gtt_factor", prescription.getGttFactor());
+                prescriptionData.put("calculated_gtt", prescription.getCalculatedGtt());
+
+                System.out.println("GTT Factor: " + prescription.getGttFactor() + " 방울/mL");
+                System.out.println("계산된 GTT: " + prescription.getCalculatedGtt() + " 방울/분");
+            } else {
+                // Fallback: Prescription 없으면 기본값 사용
+                // 간호사 실제 공식: GTT/min = (총용량 mL × GTT factor) ÷ 시간(분)
+                int gttFactor = 20;  // 기본: macro drip (20 drops/mL)
+                double totalDurationMin = session.getTotalVolumeMl() / flowRateMlPerMin;
+                int calculatedGtt = (int)((session.getTotalVolumeMl() * gttFactor) / totalDurationMin);
+
+                prescriptionData.put("gtt_factor", gttFactor);
+                prescriptionData.put("calculated_gtt", calculatedGtt);
+
+                System.out.println("⚠️ Prescription 없음 - 기본값 사용 (GTT Factor: 20 방울/mL)");
+                System.out.println("계산된 GTT: " + calculatedGtt + " 방울/분 (fallback 계산)");
+            }
 
             // 4. 초기 무게 정보 (현재 남은 용량)
             prescriptionData.put("initial_volume_ml", session.getRemainingVolume());
@@ -365,7 +403,13 @@ public class Esp8266Controller {
             }
             poleService.savePole(pole);
 
-            // 3. WebSocket 브로드캐스트 (폴대 상태 변경)
+            // 3. 활성 세션 확인 (처방 정보 있는지 체크)
+            Optional<InfusionSession> activeSession = infusionSessionRepository
+                    .findByIvPoleIdAndStatus(deviceId, InfusionSession.SessionStatus.ACTIVE);
+
+            boolean hasPrescription = activeSession.isPresent();
+
+            // 4. WebSocket 브로드캐스트 (폴대 상태 변경)
             Map<String, Object> wsMessage = new HashMap<>();
             wsMessage.put("type", "battery_update");  // ✅ 메시지 타입 추가
             wsMessage.put("device_id", deviceId);
@@ -378,9 +422,19 @@ public class Esp8266Controller {
             messagingTemplate.convertAndSend("/topic/poles/status", wsMessage);
             messagingTemplate.convertAndSend("/topic/patients", wsMessage);  // ✅ 통합 토픽에도 브로드캐스트
 
-            System.out.println("[ESP PING] Success - Pole online");
+            System.out.println("[ESP PING] Success - Pole online | prescription_available=" + hasPrescription);
 
-            return createResponse("success", "Ping received", wsMessage);
+            // 5. 응답에 처방 가능 여부 포함
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Ping received");
+            response.put("prescription_available", hasPrescription);
+            response.put("device_id", deviceId);
+            response.put("battery_level", pole.getBatteryLevel());
+            response.put("is_online", true);
+            response.put("timestamp", LocalDateTime.now().toString());
+
+            return response;
 
         } catch (Exception e) {
             System.err.println("[ESP PING] Error: " + e.getMessage());

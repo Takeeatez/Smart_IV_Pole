@@ -43,7 +43,9 @@
       "Bash(fi)",
       "Bash(echo:*)",
       "Bash(done)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(npx tsc:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

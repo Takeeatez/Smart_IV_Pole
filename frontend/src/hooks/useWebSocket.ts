@@ -32,7 +32,9 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
 
   const { updatePoleData, addAlert } = useWardStore();
 
-  const serverUrl = config?.serverUrl || 'http://localhost:8081';
+  // Use environment variable for API URL (supports both local and remote)
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+  const serverUrl = config?.serverUrl || API_BASE.replace('/api/v1', '');
   const reconnectDelay = config?.reconnectDelay || 5000;
   const debug = config?.debug || false;
 
@@ -51,7 +53,7 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
 
       connectHeaders: {},
 
-      debug: debug ? (str) => console.log('🔌 STOMP:', str) : undefined,
+      debug: debug ? (str) => console.log('🔌 STOMP:', str) : () => {},
 
       reconnectDelay: reconnectDelay,
       heartbeatIncoming: 4000,
@@ -150,15 +152,24 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
         timestamp
       } = data;
 
+      // 🔄 RECALCULATE PERCENTAGE: Use prescription total volume as denominator
+      const { patients } = useWardStore.getState();
+      const patient = patients.find((p) => p.id === `P${patient_id}`);
+      const totalVolume = patient?.currentPrescription?.totalVolume || 500;
+      const recalculatedPercentage = (remaining_volume / totalVolume) * 100;
+
+      console.log(`📊 [PERCENTAGE] Patient P${patient_id}: ${remaining_volume}/${totalVolume}mL = ${recalculatedPercentage.toFixed(1)}% (ESP: ${percentage}%)`);
+
       // Update pole data in store
       updatePoleData(device_id, {
         poleId: device_id,
         patientId: `P${patient_id}`, // Include patientId for bed matching
         weight: current_weight,
         currentVolume: remaining_volume,
-        percentage: percentage,
-        flowRate: flow_rate_measured,              // ✅ 투여 속도 (측정값)
-        prescribedRate: flow_rate_prescribed,      // ✅ 투여 속도 (처방값)
+        capacity: totalVolume,                       // ✅ Set capacity from prescription
+        percentage: recalculatedPercentage,          // ✅ Recalculated based on prescription
+        flowRate: flow_rate_measured * 60,           // ✅ Convert mL/min → mL/h
+        prescribedRate: flow_rate_prescribed * 60,   // ✅ Convert mL/min → mL/h
         status: state === 'STABLE' ? 'online' : 'error',
         estimatedTime: remaining_time_sec ? remaining_time_sec / 60 : 0, // Convert seconds to minutes
         lastUpdate: new Date(timestamp),
@@ -259,11 +270,15 @@ export const usePoleWebSocket = (poleId: string, config?: WebSocketConfig) => {
   const [poleData, setPoleData] = useState<any>(null);
   const clientRef = useRef<Client | null>(null);
 
-  const serverUrl = config?.serverUrl || 'http://localhost:8081';
+  // Use environment variable for API URL (supports both local and remote)
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+  const serverUrl = config?.serverUrl || API_BASE.replace('/api/v1', '');
 
   useEffect(() => {
     const client = new Client({
       webSocketFactory: () => new SockJS(`${serverUrl}/ws`) as any,
+
+      debug: () => {},
 
       onConnect: () => {
         console.log(`✅ Connected to pole ${poleId}`);

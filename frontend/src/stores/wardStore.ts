@@ -218,15 +218,21 @@ export const useWardStore = create<WardStore>((set, get) => ({
     set((state) => {
       const newPoleData = new Map(state.poleData);
       const existing = newPoleData.get(poleId);
-      
+
       if (existing) {
         newPoleData.set(poleId, { ...existing, ...data, lastUpdate: new Date() });
       } else {
+        // 🔄 DYNAMIC CAPACITY: Get from patient's prescription instead of hardcoded 500
+        const patient = state.patients.find(p => p.id === data.patientId);
+        const prescriptionVolume = patient?.currentPrescription?.totalVolume || 500;
+
+        console.log(`💊 [CAPACITY] Pole ${poleId} capacity from prescription: ${prescriptionVolume}mL (Patient: ${data.patientId})`);
+
         // Create new pole data with defaults
         newPoleData.set(poleId, {
           poleId,
           weight: 0,
-          capacity: 500,
+          capacity: prescriptionVolume,  // ✅ Use prescription volume instead of hardcoded 500
           currentVolume: 0,
           percentage: 0,
           battery: 100,
@@ -1391,7 +1397,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
     }
 
     try {
-      const response = await fetch('http://localhost:8081/api/v1/alerts', {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+      const response = await fetch(`${API_URL}/alerts`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -1409,7 +1416,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
           );
 
           return {
-            id: `ALERT-${backendAlert.alertId}`,
+            id: `ALT${backendAlert.alertId}`, // 고유 ID 생성 (ALERT- 대신 ALT)
             patientId: session?.id || '',
             poleId: session?.poleId || '',
             type: backendAlert.alertType === 'nurse_call' ? 'button_pressed' :
@@ -1424,9 +1431,22 @@ export const useWardStore = create<WardStore>((set, get) => ({
           };
         });
 
-        // Update state with fetched alerts
-        set({ alerts: convertedAlerts });
-        console.log(`✅ [fetchAlerts] Loaded ${convertedAlerts.length} alerts from backend`);
+        // 중복 제거: 기존 alerts와 병합하되 동일 ID는 최신 것으로 업데이트
+        const existingAlerts = get().alerts;
+        const alertMap = new Map<string, Alert>();
+
+        // 기존 alerts를 Map에 추가
+        existingAlerts.forEach(alert => alertMap.set(alert.id, alert));
+
+        // 새로운 alerts로 업데이트 (덮어쓰기)
+        convertedAlerts.forEach(alert => alertMap.set(alert.id, alert));
+
+        // Map을 배열로 변환
+        const mergedAlerts = Array.from(alertMap.values());
+
+        // Update state with deduplicated alerts
+        set({ alerts: mergedAlerts });
+        console.log(`✅ [fetchAlerts] Loaded ${convertedAlerts.length} alerts from backend (${mergedAlerts.length} total after deduplication)`);
       } else {
         console.error('❌ [fetchAlerts] Failed to fetch alerts:', response.statusText);
       }
@@ -1448,10 +1468,13 @@ export const useWardStore = create<WardStore>((set, get) => ({
     }
 
     try {
-      // Extract backend alert ID from frontend alert ID (ALERT-123 -> 123)
-      const backendAlertId = alertId.replace('ALERT-', '');
+      // Extract backend alert ID from frontend alert ID (ALT1089 -> 1089)
+      const backendAlertId = alertId.replace(/^ALT/, '');
 
-      const response = await fetch(`http://localhost:8081/api/v1/alerts/${backendAlertId}/acknowledge?nurseId=${nurseId}`, {
+      // Use environment variable for API URL (supports both local and remote)
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+
+      const response = await fetch(`${API_URL}/alerts/${backendAlertId}/acknowledge?nurseId=${nurseId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1467,7 +1490,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
         // Refresh alerts from backend
         await get().fetchAlerts();
       } else {
-        console.error('❌ [acknowledgeAlert] Failed to acknowledge alert on backend:', response.statusText);
+        const errorText = await response.text();
+        console.error('❌ [acknowledgeAlert] Failed to acknowledge alert on backend:', response.status, errorText);
         // Fallback to local state update
         get().acknowledgeAlert(alertId, nurseId);
       }
@@ -1494,7 +1518,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
       // Extract numeric patient ID from string (P123 -> 123)
       const numericPatientId = patientId.replace('P', '');
 
-      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/connect?patientId=${numericPatientId}`, {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+      const response = await fetch(`${API_URL}/poles/${poleId}/connect?patientId=${numericPatientId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1605,7 +1630,8 @@ export const useWardStore = create<WardStore>((set, get) => ({
 
       const poleId = patient.poleId;
 
-      const response = await fetch(`http://localhost:8081/api/v1/poles/${poleId}/disconnect`, {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+      const response = await fetch(`${API_URL}/poles/${poleId}/disconnect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
