@@ -48,7 +48,17 @@ class InfusionSession {
       final totalVolume = (json['totalVolumeMl'] ?? json['totalVolume'] ?? 0).toDouble();
       final currentWeight = (json['currentWeightGrams'] ?? json['currentWeight'] ?? 0).toDouble();
       final remainingVolume = (json['remainingVolumeMl'] ?? json['remainingVolume'] ?? 0).toDouble();
-      final remainingPercentage = (json['remainingPercentage'] ?? 0).toDouble();
+
+      // 🔄 RECALCULATE PERCENTAGE: 프론트엔드와 동일한 로직 적용
+      // 백엔드 percentage는 수액팩 무게 때문에 100% 초과 가능 → 무시
+      // 처방 totalVolume 기준으로 재계산: (remainingVolume / totalVolume) * 100
+      final backendPercentage = (json['remainingPercentage'] ?? 0).toDouble();
+      final remainingPercentage = totalVolume > 0
+          ? (remainingVolume / totalVolume) * 100
+          : 0.0;
+
+      print('📊 [PERCENTAGE] Recalculated: $remainingVolume/$totalVolume mL = ${remainingPercentage.toStringAsFixed(1)}% (Backend: ${backendPercentage.toStringAsFixed(1)}%)');
+
       final remainingTimeMinutes = json['remainingTimeMinutes'] ?? json['calculatedRemainingTime'] ?? 0;
       final status = _parseStatus(json['status']);
       final flowRate = (json['currentFlowRate'] ?? json['flowRate'] ?? json['gtt'] ?? 0).toDouble();

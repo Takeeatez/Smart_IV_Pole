@@ -121,9 +121,9 @@ class SimplifiedStatusCard extends StatelessWidget {
               const SizedBox(width: 16),
               Expanded(
                 child: _buildInfoTile(
-                  icon: Icons.scale,
-                  label: '현재 무게',
-                  value: '${session!.currentWeight.toStringAsFixed(0)} g',
+                  icon: Icons.water_drop,
+                  label: '남은 수액',
+                  value: '${session!.remainingPercentage.toStringAsFixed(0)}%',
                   color: statusColor,
                 ),
               ),

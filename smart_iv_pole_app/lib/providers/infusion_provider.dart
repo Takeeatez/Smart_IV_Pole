@@ -121,7 +121,7 @@ class InfusionNotifier extends StateNotifier<InfusionState> {
     _pollingTimer?.cancel();
 
     _pollingTimer = Timer.periodic(
-      const Duration(seconds: 1), // 1초마다 폴링하여 실시간 데이터 갱신
+      const Duration(minutes: 1), // 1분마다 폴링하여 데이터 갱신
       (_) async {
         // mounted 체크 후에만 데이터 새로고침
         if (mounted) {

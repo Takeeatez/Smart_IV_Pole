@@ -1,101 +1,129 @@
 #include <ESP8266WiFi.h>
 #include "HX711.h"
 #include <ESP8266HTTPClient.h>
-#include <ArduinoJson.h>  // ArduinoJson 7.4.2
+#include <ArduinoJson.h>
 
-// WiFi and server credentials - loaded from config.h (not tracked by git)
 #include "config.h"
 
-// ESP8266 고유 ID (MAC 주소 기반)
 String deviceId = "";
 
-// --- 측정 설정값 (0.5초 간격, 120 샘플) ---
-const unsigned long MEASURE_INTERVAL = 500;  // 0.5초마다 측정 (120 샘플/분)
-const unsigned long PING_INTERVAL = 30000;   // 30초마다 핑 전송
-const int HISTORY_SIZE = 120;                // 120개 샘플 (60초 윈도우)
-float calibration_factor = 400;              // 로드셀 기본 캘리값
+// --- 측정 모드 선택 ---
+enum MeasurementMode {
+  PRODUCTION_MODE,  // 실제 운영 모드 (다중 주기 통합)
+  TEST_MODE         // 테스트 모드 (주기 변경 가능)
+};
 
-// --- 자동 시작 설정 ---
-const float WEIGHT_DETECTION_THRESHOLD = 50.0;  // 50g 이상 증가 시 수액 감지
-const unsigned long AUTO_START_DELAY = 10000;   // 10초 대기 후 측정 시작
+MeasurementMode currentMode = PRODUCTION_MODE;
 
-// --- 이벤트 기반 전송 설정 ---
-const float DATA_SEND_DEVIATION_THRESHOLD = 15.0;  // 15% 이상 편차 시 전송
-const float CRITICAL_DEVIATION_THRESHOLD = 25.0;   // 25% 이상 편차 시 긴급 전송
-const float LOW_VOLUME_THRESHOLD = 10.0;           // 잔여량 10% 미만 시 전송
-const unsigned long MIN_SEND_INTERVAL = 5000;      // 최소 5초 간격으로 전송
+// ========== 운영 모드 - 다중 주기 변수 ==========
+const int NUM_INTERVALS = 4;
+unsigned long INTERVALS[NUM_INTERVALS] = {40000, 50000, 60000, 70000};  // 40, 50, 60, 70초
+String intervalNames[NUM_INTERVALS] = {"40초", "50초", "60초", "70초"};
 
-// --- 간호사 처방 정보 (서버에서 수신) ---
+struct IntervalData {
+  unsigned long lastMeasureTime;
+  float previousWeight;
+  float currentFlowRate;
+  float totalFlowSum;
+  int measurementCount;
+  float minFlowRate;
+  float maxFlowRate;
+};
+
+// 서버에 전송된 데이터 유무
+struct ServerLastData {
+  float lastFlowRate;
+  int lastRemainingVolume;
+  float lastDeviation;
+  bool hasData;
+};
+
+ServerLastData serverLastData = {0, 0, 0, false};
+
+IntervalData intervalData[NUM_INTERVALS];
+float combinedAverageFlowRate = 0;
+int totalCombinedMeasurements = 0;
+
+const unsigned long PING_INTERVAL = 30000;
+const unsigned long PRESCRIPTION_REQUEST_INTERVAL = 60000;
+float calibration_factor = 400;
+
+const float WEIGHT_DETECTION_THRESHOLD = 50.0;
+const unsigned long AUTO_START_DELAY = 10000;
+
+const float EMPTY_BAG_WEIGHT = 100.0;  // 빈 수액팩 무게
+const float WARNING_DEVIATION_THRESHOLD = 10.0;   // 10% 이상 주의 (전송)
+const float CRITICAL_DEVIATION_THRESHOLD = 20.0;  // 20% 이상 위험
+const float LOW_VOLUME_THRESHOLD = 10.0;
+const unsigned long MIN_SEND_INTERVAL = 5000;
+
 struct PrescriptionInfo {
-  float totalVolume;          // 총 수액량 (mL)
-  float prescribedRate;       // 처방 유속 (mL/min)
-  int gttFactor;              // GTT 계수 (20 or 60)
-  int calculatedGTT;          // 계산된 GTT/min
-  bool isInitialized;         // 초기화 완료 여부
+  float totalVolume;
+  float prescribedRate;
+  int gttFactor;
+  int calculatedGTT;
+  bool isInitialized;
 };
 
 PrescriptionInfo prescription = {0, 0, 20, 0, false};
 
-// --- 검증 데이터 (처방 정보 기반 자동 생성) ---
 struct ValidationData {
-  float expectedFlowRate;        // 예상 유속 (mL/min) - 처방값과 동일
-  float minAcceptableRate;       // 최소 허용 유속 (85%)
-  float maxAcceptableRate;       // 최대 허용 유속 (115%)
-  float warningDeviationPercent; // 경고 편차 (15%)
-  float criticalDeviationPercent;// 긴급 편차 (25%)
-  float totalDurationMin;        // 총 투여 시간 (분)
-  unsigned long startTimeMs;     // 측정 시작 시각
+  float expectedFlowRate;
+  float minAcceptableRate;
+  float maxAcceptableRate;
+  float warningDeviationPercent;
+  float criticalDeviationPercent;
+  float totalDurationMin;
+  unsigned long startTimeMs;
 };
 
 ValidationData validation = {0, 0, 0, 15.0, 25.0, 0, 0};
 
-// --- 측정 상태 관리 (단순화된 4-state 머신) ---
 enum SystemState {
-  IDLE_NO_PRESCRIPTION,  // 처방 대기 - 간호사 연결 전
-  WAITING_WEIGHT,        // 무게 대기 - 수액 걸기 전
-  MEASURING,             // 측정 중 - 0.5초마다 120 샘플 수집
-  COMPLETED              // 완료 - 수액 소진
+  WAITING_WEIGHT,
+  MEASURING,
+  COMPLETED
 };
 
-SystemState currentState = IDLE_NO_PRESCRIPTION;
+SystemState currentState = WAITING_WEIGHT;
 
-// --- 무게 측정 데이터 ---
-float baselineWeight = 0;       // 영점 (빈 상태)
-float initialWeight = 0;        // 수액 걸었을 때 전체 무게
-float currentWeight = 0;        // 현재 무게
-unsigned long weightDetectedTime = 0;  // 수액 무게 감지 시작 시간
-unsigned long measureStartTime = 0;    // 측정 시작 시각
+float baselineWeight = 0;
+float initialWeight = 0;
+float currentWeight = 0;
+unsigned long weightDetectedTime = 0;
+unsigned long measureStartTime = 0;
 
-// --- 유속 계산용 슬라이딩 윈도우 (120 샘플, 60초) ---
-float weightHistory120[120];    // 최근 120개 샘플 (0.5초마다)
-int weightIndex120 = 0;
-bool weight120Full = false;     // 120개 샘플이 채워졌는지
-unsigned long lastMeasureTime = 0;
+unsigned long lastDataSendTime = 0;
+bool initialDataSent = false;
 
-// --- 이벤트 기반 전송 제어 ---
-unsigned long lastDataSendTime = 0;  // 마지막 데이터 전송 시간
-bool initialDataSent = false;        // 초기 데이터 전송 여부 (60초 후 1회)
-
-// --- 핑 제어 ---
 unsigned long lastPingTime = 0;
+unsigned long lastPrescriptionRequestTime = 0;
+bool prescriptionRequestFailed = false;  // ✅ 추가: 실패 여부 플래그
 
-// --- WiFi 상태 ---
 const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
 unsigned long lastWifiCheck = 0;
 bool wifiConnected = false;
 
-// --- 센서 에러 처리 ---
 const float SENSOR_ERROR_VALUE = -999.0;
 const int MAX_SENSOR_READ_ATTEMPTS = 3;
 int sensorErrorCount = 0;
+
+// ========== 테스트 모드 변수 ==========
+unsigned long TEST_MEASURE_INTERVAL = 60000;
+unsigned long lastTestMeasureTime = 0;
+float testPreviousWeight = 0;
+float testCurrentFlowRate = 0;
+float testTotalFlowSum = 0;
+int testMeasurementCount = 0;
+float testMinFlowRate = 99999;
+float testMaxFlowRate = -99999;
 
 HX711 scale;
 WiFiClient client;
 HTTPClient http;
 
-// ==================== 유틸리티 함수 ====================
+// ==================== 센서 함수 ====================
 
-// --- WiFi 상태 확인 및 재연결 ---
 void checkAndReconnectWiFi() {
   unsigned long now = millis();
   if (now - lastWifiCheck >= WIFI_RECONNECT_INTERVAL) {
@@ -116,10 +144,6 @@ void checkAndReconnectWiFi() {
       if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println("\nWiFi reconnected!");
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
-      } else {
-        Serial.println("\nWiFi reconnect failed.");
       }
     } else {
       wifiConnected = true;
@@ -127,32 +151,21 @@ void checkAndReconnectWiFi() {
   }
 }
 
-// --- 안전한 센서 읽기 with retry logic ---
 float safeReadSensor() {
   if (!scale.wait_ready_timeout(1000)) {
-    Serial.println("[SENSOR ERROR] Sensor not ready after timeout");
+    Serial.println("[SENSOR ERROR] Sensor not ready");
     sensorErrorCount++;
-    if (sensorErrorCount >= 5) {
-      Serial.println("[SENSOR ERROR] Multiple failures - check hardware connection");
-      sensorErrorCount = 0;
-    }
     return SENSOR_ERROR_VALUE;
   }
 
   for (int attempt = 1; attempt <= MAX_SENSOR_READ_ATTEMPTS; attempt++) {
     scale.set_scale(calibration_factor);
-    float weight = scale.get_units(10);  // 10회 평균
+    float weight = scale.get_units(10);
 
     if (weight > -100 && weight < 10000) {
       sensorErrorCount = 0;
       return weight;
     }
-
-    Serial.print("[SENSOR WARNING] Unusual reading: ");
-    Serial.print(weight);
-    Serial.print("g (attempt ");
-    Serial.print(attempt);
-    Serial.println("/3)");
 
     if (attempt < MAX_SENSOR_READ_ATTEMPTS) {
       delay(100);
@@ -164,45 +177,197 @@ float safeReadSensor() {
   return SENSOR_ERROR_VALUE;
 }
 
-// --- 무게 샘플 추가 (0.5초마다 호출) ---
-void addWeightSample(float weight) {
-  weightHistory120[weightIndex120] = weight;
-  weightIndex120++;
-  if (weightIndex120 >= 120) {
-    weightIndex120 = 0;
-    weight120Full = true;
+// ==================== 운영 모드 - 다중 주기 함수 ====================
+
+float calculateFlowRate(float prevWeight, float currWeight, unsigned long intervalMs) {
+  if (prevWeight <= 0 || currWeight <= 0) {
+    return 0;
   }
-}
-
-// --- 유속 계산 (120 샘플, 60초 윈도우) ---
-// 가장 오래된 샘플 - 가장 최신 샘플 = 60초간 감소량 = mL/min
-float calculateFlowRate() {
-  if (!weight120Full) {
-    return -1;  // 아직 60초 대기 중
-  }
-
-  float oldest = weightHistory120[0];        // 가장 오래된 샘플
-  float newest = weightHistory120[119];      // 가장 최신 샘플
-  float weightChange = oldest - newest;
-
-  // 비정상 값 체크 (무게 증가는 비정상)
+  
+  float weightChange = prevWeight - currWeight;
+  
   if (weightChange < 0) {
     return 0;
   }
-
-  // 60초간 감소량 = mL/min (1g = 1mL 가정)
-  return weightChange;
+  
+  if (weightChange < 0.1) {
+    return 0;
+  }
+  
+  float actualInterval = intervalMs / 1000.0;
+  float flowRatePerMin = (weightChange / actualInterval) * 60.0;
+  
+  return flowRatePerMin;
 }
 
-// --- 남은 시간 계산 (분 단위) ---
+void calculateCombinedAverage() {
+  float sum = 0;
+  int count = 0;
+  
+  for (int i = 0; i < NUM_INTERVALS; i++) {
+    if (intervalData[i].measurementCount > 0) {
+      float avg = intervalData[i].totalFlowSum / intervalData[i].measurementCount;
+      sum += avg;
+      count++;
+    }
+  }
+  
+  if (count > 0) {
+    combinedAverageFlowRate = sum / count;
+    totalCombinedMeasurements = count;
+  }
+}
+
+void configureIntervals() {
+  Serial.println("\n╔════════════════════════════════════════════════════════════╗");
+  Serial.println("║            측정 주기 설정 (4개)                          ║");
+  Serial.println("╚════════════════════════════════════════════════════════════╝");
+  Serial.println();
+  Serial.println("4개의 측정 주기를 초 단위로 입력하세요 (5~300초)");
+  Serial.println("예시: 40,50,60,70  →  40초, 50초, 60초, 70초");
+  Serial.println();
+  Serial.print("입력: ");
+  
+  while (!Serial.available()) {
+    delay(100);
+  }
+  
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+  Serial.println(input);
+  
+  int values[NUM_INTERVALS];
+  int valueCount = 0;
+  int startIndex = 0;
+  
+  for (int i = 0; i <= input.length(); i++) {
+    if (i == input.length() || input.charAt(i) == ',') {
+      String token = input.substring(startIndex, i);
+      token.trim();
+      
+      if (token.length() > 0 && valueCount < NUM_INTERVALS) {
+        values[valueCount] = token.toInt();
+        valueCount++;
+      }
+      startIndex = i + 1;
+    }
+  }
+  
+  if (valueCount == NUM_INTERVALS) {
+    bool allValid = true;
+    for (int i = 0; i < NUM_INTERVALS; i++) {
+      if (values[i] < 5 || values[i] > 300) {
+        allValid = false;
+        break;
+      }
+    }
+    
+    if (allValid) {
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        INTERVALS[i] = values[i] * 1000;
+        intervalNames[i] = String(values[i]) + "초";
+      }
+      
+      Serial.println("\n측정 주기 설정 완료:");
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        Serial.print("  주기 ");
+        Serial.print(i + 1);
+        Serial.print(": ");
+        Serial.println(intervalNames[i]);
+      }
+    } else {
+      Serial.println("\n오류: 각 주기는 5~300초 사이여야 합니다");
+      Serial.println("기본값 유지: 40초, 50초, 60초, 70초");
+    }
+  } else {
+    Serial.print("\n오류: 정확히 4개의 값을 입력해야 합니다 (입력된 값: ");
+    Serial.print(valueCount);
+    Serial.println("개)");
+    Serial.println("기본값 유지: 40초, 50초, 60초, 70초");
+  }
+  
+  Serial.println();
+}
+
+void printMultiStatistics() {
+  Serial.println("\n╔════════════════════════════════════════════════════════════╗");
+  Serial.println("║          📊 다중 주기 측정 통합 통계                      ║");
+  Serial.println("╚════════════════════════════════════════════════════════════╝");
+  
+  for (int i = 0; i < NUM_INTERVALS; i++) {
+    Serial.println();
+    Serial.print("┌─ ");
+    Serial.print(intervalNames[i]);
+    Serial.println(" 주기 ─────────────────────────────");
+    
+    if (intervalData[i].measurementCount > 0) {
+      float avg = intervalData[i].totalFlowSum / intervalData[i].measurementCount;
+      float range = intervalData[i].maxFlowRate - intervalData[i].minFlowRate;
+      float variability = (avg > 0) ? (range / avg) * 100.0 : 0;
+      
+      Serial.print("│ 측정 횟수: ");
+      Serial.println(intervalData[i].measurementCount);
+      Serial.print("│ 평균 유속: ");
+      Serial.print(avg, 2);
+      Serial.println(" mL/분");
+      Serial.print("│ 최소 유속: ");
+      Serial.print(intervalData[i].minFlowRate, 2);
+      Serial.println(" mL/분");
+      Serial.print("│ 최대 유속: ");
+      Serial.print(intervalData[i].maxFlowRate, 2);
+      Serial.println(" mL/분");
+      Serial.print("│ 범위: ");
+      Serial.print(range, 2);
+      Serial.println(" mL/분");
+      Serial.print("│ 변동성: ");
+      Serial.print(variability, 1);
+      Serial.println(" %");
+    } else {
+      Serial.println("│ 측정 데이터 없음");
+    }
+    
+    Serial.println("└───────────────────────────────────────────");
+  }
+  
+  Serial.println();
+  Serial.println("╔════════════════════════════════════════════════════════════╗");
+  Serial.println("║                 통합 평균 유속 (4개 주기 평균)               ║");
+  Serial.println("╚════════════════════════════════════════════════════════════╝");
+  
+  if (totalCombinedMeasurements > 0) {
+    Serial.print("  활성 주기: ");
+    Serial.print(totalCombinedMeasurements);
+    Serial.print("/");
+    Serial.println(NUM_INTERVALS);
+    Serial.print("  📌 통합 평균 유속: ");
+    Serial.print(combinedAverageFlowRate, 2);
+    Serial.println(" mL/분");
+    
+    Serial.println("\n  계산 방식:");
+    for (int i = 0; i < NUM_INTERVALS; i++) {
+      if (intervalData[i].measurementCount > 0) {
+        float avg = intervalData[i].totalFlowSum / intervalData[i].measurementCount;
+        Serial.print("    - ");
+        Serial.print(intervalNames[i]);
+        Serial.print(": ");
+        Serial.print(avg, 2);
+        Serial.println(" mL/분");
+      }
+    }
+  } else {
+    Serial.println("  아직 측정 데이터 없음");
+  }
+  
+  Serial.println("╚════════════════════════════════════════════════════════════╝\n");
+}
+
 float calculateRemainingTime(float remainingWeight, float measuredFlowRate) {
   if (measuredFlowRate <= 0 || remainingWeight <= 0) {
     return -1;
   }
-  return remainingWeight / measuredFlowRate;  // 분 단위
+  return remainingWeight / measuredFlowRate;
 }
 
-// --- 유속 편차 계산 (%) ---
 float calculateFlowDeviation(float measuredRate) {
   if (!prescription.isInitialized || prescription.prescribedRate <= 0) {
     return 0;
@@ -211,16 +376,25 @@ float calculateFlowDeviation(float measuredRate) {
   return deviation * 100.0;
 }
 
-// --- 검증 데이터 생성 (처방 정보 기반) ---
+String getDeviationStatus(float deviation) {
+  float absDeviation = abs(deviation);
+  if (absDeviation < WARNING_DEVIATION_THRESHOLD) {
+    return "✅ 정상";
+  } else if (absDeviation < CRITICAL_DEVIATION_THRESHOLD) {
+    return "⚠️ 주의";
+  } else {
+    return "🚨 위험";
+  }
+}
+
 void generateValidationData() {
   if (!prescription.isInitialized) {
-    Serial.println("❌ 처방 정보 없음 - 검증 데이터 생성 불가");
     return;
   }
 
   validation.expectedFlowRate = prescription.prescribedRate;
-  validation.minAcceptableRate = prescription.prescribedRate * 0.85;  // 85%
-  validation.maxAcceptableRate = prescription.prescribedRate * 1.15;  // 115%
+  validation.minAcceptableRate = prescription.prescribedRate * 0.85;
+  validation.maxAcceptableRate = prescription.prescribedRate * 1.15;
   validation.warningDeviationPercent = 15.0;
   validation.criticalDeviationPercent = 25.0;
   validation.totalDurationMin = prescription.totalVolume / prescription.prescribedRate;
@@ -230,22 +404,8 @@ void generateValidationData() {
   Serial.print("  예상 유속: ");
   Serial.print(validation.expectedFlowRate, 2);
   Serial.println(" mL/min");
-  Serial.print("  허용 범위: ");
-  Serial.print(validation.minAcceptableRate, 2);
-  Serial.print(" ~ ");
-  Serial.print(validation.maxAcceptableRate, 2);
-  Serial.println(" mL/min");
-  Serial.print("  총 투여 시간: ");
-  Serial.print(validation.totalDurationMin, 1);
-  Serial.println(" 분");
-  Serial.print("  GTT: ");
-  Serial.print(prescription.calculatedGTT);
-  Serial.println(" 방울/분");
 }
 
-// ==================== 네트워크 함수 ====================
-
-// --- 핑 전송 (30초마다) ---
 void sendPing() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -265,58 +425,94 @@ void sendPing() {
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(10000);
 
-  Serial.println("[PING] Sending: " + json);
   int code = http.POST(json);
 
   if (code == 200) {
-    String response = http.getString();
-    Serial.print("[PING] Success (Battery: ");
-    Serial.print(batteryLevel);
-    Serial.println("%)");
-
-    // ✅ 응답 JSON 파싱
+    // ✅ 응답 파싱하여 서버의 최근 데이터 저장
+    String payload = http.getString();
+    
     JsonDocument responseDoc;
-    DeserializationError error = deserializeJson(responseDoc, response);
-
-    if (!error && responseDoc.containsKey("prescription_available")) {
-      bool prescriptionAvailable = responseDoc["prescription_available"] | false;
-
-      // ✅ 처방 정보 있고, 현재 대기 상태면 즉시 요청
-      if (prescriptionAvailable && currentState == IDLE_NO_PRESCRIPTION) {
-        Serial.println("🔔 처방 정보 감지! 자동 요청 중...");
-
-        if (requestPrescriptionInfo()) {
-          Serial.println("✅ 처방 정보 수신 완료 - 수액 대기 상태로 전환");
-          currentState = WAITING_WEIGHT;
-        } else {
-          Serial.println("⚠️ 처방 정보 요청 실패 - 다음 핑에서 재시도");
-        }
-      } else if (!prescriptionAvailable && currentState == IDLE_NO_PRESCRIPTION) {
-        Serial.println("⏳ 처방 대기 중... (간호사가 환자 연결 및 처방 입력 필요)");
+    DeserializationError error = deserializeJson(responseDoc, payload);
+    
+    if (!error && responseDoc.containsKey("last_data")) {
+      JsonObject lastData = responseDoc["last_data"].as<JsonObject>();
+      
+      if (!lastData.isNull()) {
+        serverLastData.lastFlowRate = lastData["flow_rate"].as<float>();
+        serverLastData.lastRemainingVolume = lastData["remaining_volume"].as<int>();
+        serverLastData.lastDeviation = lastData["deviation"].as<float>();
+        serverLastData.hasData = true;
+        
+        Serial.println("[PING] 서버 최근 데이터:");
+        Serial.print("  유속: ");
+        Serial.print(serverLastData.lastFlowRate, 2);
+        Serial.println(" mL/분");
+        Serial.print("  잔량: ");
+        Serial.print(serverLastData.lastRemainingVolume);
+        Serial.println(" mL");
+      } else {
+        serverLastData.hasData = false;
       }
     }
-
+    
     digitalWrite(LED_BUILTIN, LOW);
     delay(100);
     digitalWrite(LED_BUILTIN, HIGH);
-  } else if (code > 0) {
-    Serial.print("[PING] HTTP Error: ");
-    Serial.println(code);
-  } else {
-    Serial.print("[PING] Connection failed: ");
-    Serial.println(http.errorToString(code));
   }
   http.end();
 }
 
-// --- 경고 전송 ---
-void sendAlert(const char* alertType, float deviationPercent) {
+// ========== 데이터 전송 전 중복 확인 함수 추가 ==========
+bool shouldSendData(float currentFlowRate, int currentRemaining, float currentDeviation) {
+  // 서버에 데이터가 없으면 무조건 전송
+  if (!serverLastData.hasData) {
+    return true;
+  }
+  
+  // 변화량 임계값 설정
+  const float FLOW_RATE_THRESHOLD = 1.0;      // 1 mL/분 이상 차이
+  const int REMAINING_THRESHOLD = 5;          // 5 mL 이상 차이
+  const float DEVIATION_THRESHOLD = 2.0;      // 2% 이상 차이
+  
+  // 유속 변화 확인
+  float flowRateDiff = abs(currentFlowRate - serverLastData.lastFlowRate);
+  if (flowRateDiff >= FLOW_RATE_THRESHOLD) {
+    Serial.print("📊 유속 변화 감지: ");
+    Serial.print(flowRateDiff, 2);
+    Serial.println(" mL/분");
+    return true;
+  }
+  
+  // 잔량 변화 확인
+  int remainingDiff = abs(currentRemaining - serverLastData.lastRemainingVolume);
+  if (remainingDiff >= REMAINING_THRESHOLD) {
+    Serial.print("📊 잔량 변화 감지: ");
+    Serial.print(remainingDiff);
+    Serial.println(" mL");
+    return true;
+  }
+  
+  // 편차 변화 확인
+  float deviationDiff = abs(currentDeviation - serverLastData.lastDeviation);
+  if (deviationDiff >= DEVIATION_THRESHOLD) {
+    Serial.print("📊 편차 변화 감지: ");
+    Serial.print(deviationDiff, 2);
+    Serial.println(" %");
+    return true;
+  }
+  
+  Serial.println("📊 변화 없음 - 전송 생략");
+  return false;
+}
+
+void sendAlert(const char* alertType, float value) {
   if (WiFi.status() != WL_CONNECTED) return;
 
   JsonDocument doc;
   doc["device_id"] = deviceId;
   doc["alert_type"] = alertType;
-  doc["deviation_percent"] = deviationPercent;
+  doc["value"] = value;
+  doc["deviation_percent"] = value;  // ✅ 서버 호환성
   doc["timestamp"] = millis();
 
   String json;
@@ -324,22 +520,16 @@ void sendAlert(const char* alertType, float deviationPercent) {
 
   http.begin(client, serverHost, serverPort, "/api/esp/alert");
   http.addHeader("Content-Type", "application/json");
-  int code = http.POST(json);
-
-  if (code == 200) {
-    Serial.println("✅ 경고 전송 성공");
-  } else {
-    Serial.println("❌ 경고 전송 실패");
-  }
+  http.POST(json);
   http.end();
 }
 
-// --- 데이터 전송 ---
 void sendData(float currentWeight, float measuredRate, float remainingTime,
               float deviation, const char* state) {
 
-  float remainingWeight = currentWeight - baselineWeight;
-  float consumedWeight = initialWeight - currentWeight;
+  float remainingLiquidWeight = currentWeight - EMPTY_BAG_WEIGHT - baselineWeight;
+  float initialLiquidWeight = initialWeight - EMPTY_BAG_WEIGHT - baselineWeight;
+  float consumedWeight = initialLiquidWeight - remainingLiquidWeight;
 
   JsonDocument doc;
   doc["device_id"] = deviceId;
@@ -347,12 +537,13 @@ void sendData(float currentWeight, float measuredRate, float remainingTime,
   doc["initial_weight"] = initialWeight;
   doc["baseline_weight"] = baselineWeight;
   doc["weight_consumed"] = consumedWeight;
-  doc["weight_remaining"] = remainingWeight;
+  doc["weight_remaining"] = remainingLiquidWeight;
   doc["flow_rate_measured"] = measuredRate;
-  doc["flow_rate_prescribed"] = prescription.prescribedRate;
+  doc["flow_rate_prescribed"] = prescription.isInitialized ? prescription.prescribedRate : 0;
   doc["remaining_time_sec"] = remainingTime;
   doc["deviation_percent"] = deviation;
   doc["state"] = state;
+  doc["prescription_available"] = prescription.isInitialized;
   doc["timestamp"] = millis();
 
   String json;
@@ -362,7 +553,7 @@ void sendData(float currentWeight, float measuredRate, float remainingTime,
     http.begin(client, serverHost, serverPort, serverPath);
     http.addHeader("Content-Type", "application/json");
 
-    Serial.println("📤 데이터 전송: " + json);
+    Serial.println("📤 데이터 전송");
 
     int code = http.POST(json);
     if (code == 200) {
@@ -372,16 +563,26 @@ void sendData(float currentWeight, float measuredRate, float remainingTime,
       Serial.println(code);
     }
     http.end();
-  } else {
-    Serial.println("WiFi 연결 없음");
   }
 }
 
-// --- 처방 정보 요청 (서버에서 가져오기) ---
-bool requestPrescriptionInfo() {
+void requestPrescriptionInfo() {
+  unsigned long now = millis();
+  
+  // ✅ 이미 초기화되었으면 주기적으로만 재요청
+  if (prescription.isInitialized) {
+    if (now - lastPrescriptionRequestTime < PRESCRIPTION_REQUEST_INTERVAL) {
+      return;
+    }
+  }
+  
+  // ✅ 실패했으면 재요청하지 않음 (한번만 시도)
+  if (prescriptionRequestFailed) {
+    return;
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi 연결 없음 - 처방 정보 요청 불가");
-    return false;
+    return;
   }
 
   String initUrl = "/api/esp/init?device_id=" + deviceId;
@@ -397,76 +598,168 @@ bool requestPrescriptionInfo() {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
 
-    if (error) {
-      Serial.print("❌ JSON 파싱 실패: ");
-      Serial.println(error.c_str());
-      http.end();
-      return false;
-    }
-
-    if (doc.containsKey("data") && doc["data"].is<JsonObject>()) {
+    if (!error && doc.containsKey("data")) {
       JsonObject data = doc["data"].as<JsonObject>();
 
       if (data.containsKey("total_volume_ml") && data.containsKey("flow_rate_ml_min")) {
         prescription.totalVolume = data["total_volume_ml"].as<float>();
         prescription.prescribedRate = data["flow_rate_ml_min"].as<float>();
-
-        if (data.containsKey("gtt_factor")) {
-          prescription.gttFactor = data["gtt_factor"].as<int>();
-        } else {
-          prescription.gttFactor = 20;
-        }
-
-        if (data.containsKey("calculated_gtt")) {
-          prescription.calculatedGTT = data["calculated_gtt"].as<int>();
-        } else {
-          prescription.calculatedGTT = (int)(prescription.prescribedRate * prescription.gttFactor);
-        }
-
+        prescription.gttFactor = data.containsKey("gtt_factor") ? data["gtt_factor"].as<int>() : 20;
+        prescription.calculatedGTT = data.containsKey("calculated_gtt") ? 
+                                      data["calculated_gtt"].as<int>() : 
+                                      (int)(prescription.prescribedRate * prescription.gttFactor);
         prescription.isInitialized = true;
+        prescriptionRequestFailed = false;  // ✅ 성공 시 플래그 리셋
 
-        Serial.println("✅ 처방 정보 초기화 완료!");
-        Serial.print("총 용량: ");
-        Serial.print(prescription.totalVolume);
+        Serial.println("\n╔════════════════════════════════════════════════════════════╗");
+        Serial.println("║           ✅ 처방 정보 수신 완료!                        ║");
+        Serial.println("╚════════════════════════════════════════════════════════════╝");
+        Serial.print("  📌 총 투여량: ");
+        Serial.print(prescription.totalVolume, 0);
         Serial.println(" mL");
-        Serial.print("처방 유속: ");
-        Serial.print(prescription.prescribedRate);
-        Serial.println(" mL/min");
-        Serial.print("GTT Factor: ");
+        Serial.print("  📌 처방 유속: ");
+        Serial.print(prescription.prescribedRate, 2);
+        Serial.println(" mL/분");
+        Serial.print("  📌 GTT Factor: ");
         Serial.println(prescription.gttFactor);
-        Serial.print("계산된 GTT: ");
+        Serial.print("  📌 계산된 GTT: ");
         Serial.print(prescription.calculatedGTT);
         Serial.println(" 방울/분");
+        Serial.print("  📌 예상 시간: ");
+        float expectedTime = prescription.totalVolume / prescription.prescribedRate;
+        Serial.print(expectedTime, 1);
+        Serial.print(" 분 (");
+        Serial.print(expectedTime / 60.0, 1);
+        Serial.println(" 시간)");
+        Serial.println("────────────────────────────────────────────────────────────");
+        Serial.println("  💡 이제 측정값과 처방값을 비교하여 편차를 모니터링합니다.");
+        Serial.println("╚════════════════════════════════════════════════════════════╝\n");
 
-        // 검증 데이터 자동 생성
         generateValidationData();
+        lastPrescriptionRequestTime = now;
 
         http.end();
-        return true;
-      } else {
-        Serial.println("❌ 필수 필드 누락 (total_volume_ml, flow_rate_ml_min)");
+        return;
       }
-    } else {
-      Serial.println("❌ 'data' 필드 없음 또는 잘못된 형식");
     }
-  } else {
-    Serial.print("❌ 처방 정보 요청 실패: ");
-    Serial.println(httpCode);
+  } else if (httpCode > 0) {
+    // ✅ 실패 시 한번만 출력
+    if (!prescriptionRequestFailed) {
+      Serial.print("⚠️ 처방 정보 요청 실패: HTTP ");
+      Serial.println(httpCode);
+      prescriptionRequestFailed = true;  // ✅ 플래그 설정
+    }
   }
 
+  lastPrescriptionRequestTime = now;
   http.end();
-  return false;
 }
 
-// --- 상태 문자열 변환 ---
 const char* getStateString(SystemState state) {
   switch(state) {
-    case IDLE_NO_PRESCRIPTION: return "IDLE_NO_PRESCRIPTION";
     case WAITING_WEIGHT: return "WAITING_WEIGHT";
     case MEASURING: return "MEASURING";
     case COMPLETED: return "COMPLETED";
     default: return "UNKNOWN";
   }
+}
+
+// ✅ 추가: 시스템 리셋 함수
+void resetSystemForNewSession() {
+  Serial.println("\n╔════════════════════════════════════════════════════════════╗");
+  Serial.println("║           🔄 새 세션 준비 중...                          ║");
+  Serial.println("╚════════════════════════════════════════════════════════════╝\n");
+  
+  // 영점 재설정
+  Serial.println("수액팩을 완전히 제거해주세요...");
+  delay(3000);
+  
+  scale.tare();
+  delay(2000);
+  baselineWeight = scale.get_units(10);
+  Serial.print("✅ 새 영점: ");
+  Serial.print(baselineWeight);
+  Serial.println(" g\n");
+  
+  // 통계 리셋
+  for (int i = 0; i < NUM_INTERVALS; i++) {
+    intervalData[i].totalFlowSum = 0;
+    intervalData[i].measurementCount = 0;
+    intervalData[i].minFlowRate = 99999;
+    intervalData[i].maxFlowRate = -99999;
+  }
+  
+  // 상태 리셋
+  initialDataSent = false;
+  weightDetectedTime = 0;
+  
+  // 처방 정보는 유지 (같은 환자일 수 있음)
+  
+  Serial.println("✅ 시스템 리셋 완료");
+  Serial.println("새 링거를 걸어주세요...\n");
+  
+  // 대기 상태로 전환
+  currentState = WAITING_WEIGHT;
+}
+
+// ==================== 테스트 모드 함수 ====================
+
+float calculateTestFlowRate(float prevWeight, float currWeight, unsigned long intervalMs) {
+  if (prevWeight <= 0 || currWeight <= 0) {
+    return 0;
+  }
+  
+  float weightChange = prevWeight - currWeight;
+  
+  if (weightChange < 0) {
+    Serial.println("  [WARNING] 무게 증가 감지");
+    return 0;
+  }
+  
+  if (weightChange < 0.1) {
+    return 0;
+  }
+  
+  float actualInterval = intervalMs / 1000.0;
+  float flowRatePerMin = (weightChange / actualInterval) * 60.0;
+  
+  return flowRatePerMin;
+}
+
+void printTestStatistics() {
+  if (testMeasurementCount == 0) {
+    Serial.println("아직 측정 데이터 없음");
+    return;
+  }
+  
+  float avgFlowRate = testTotalFlowSum / testMeasurementCount;
+  float range = testMaxFlowRate - testMinFlowRate;
+  float variability = (avgFlowRate > 0) ? (range / avgFlowRate) * 100.0 : 0;
+  
+  Serial.println("\n========================================");
+  Serial.println("       테스트 모드 측정 통계");
+  Serial.println("========================================");
+  Serial.print("측정 주기: ");
+  Serial.print(TEST_MEASURE_INTERVAL / 1000);
+  Serial.println(" 초");
+  Serial.print("측정 횟수: ");
+  Serial.println(testMeasurementCount);
+  Serial.print("평균 유속: ");
+  Serial.print(avgFlowRate, 2);
+  Serial.println(" mL/분");
+  Serial.print("최소 유속: ");
+  Serial.print(testMinFlowRate, 2);
+  Serial.println(" mL/분");
+  Serial.print("최대 유속: ");
+  Serial.print(testMaxFlowRate, 2);
+  Serial.println(" mL/분");
+  Serial.print("범위: ");
+  Serial.print(range, 2);
+  Serial.println(" mL/분");
+  Serial.print("변동성: ");
+  Serial.print(variability, 1);
+  Serial.println(" %");
+  Serial.println("========================================\n");
 }
 
 // ==================== 초기화 ====================
@@ -478,10 +771,41 @@ void setup() {
 
   ESP.wdtDisable();
   ESP.wdtEnable(8000);
-  delay(1000);
-  Serial.println("\n\n=== Smart IV Pole - Simplified Monitoring System ===");
+  
+  Serial.println("\n\n╔════════════════════════════════════════════════════════════╗");
+  Serial.println("║       Smart IV Pole - 통합 시스템                        ║");
+  Serial.println("╚════════════════════════════════════════════════════════════╝\n");
+  
+  // 모드 선택
+  Serial.println("실행 모드를 선택하세요:");
+  Serial.println("  1 - 운영 모드 (다중 주기 통합 측정)");
+  Serial.println("  2 - 테스트 모드 (단일 주기 테스트)");
+  Serial.print("\n입력 (1 또는 2): ");
+  
+  unsigned long modeSelectStart = millis();
+  while (!Serial.available() && (millis() - modeSelectStart < 10000)) {
+    delay(100);
+    ESP.wdtFeed();
+  }
+  
+  if (Serial.available()) {
+    String modeInput = Serial.readStringUntil('\n');
+    modeInput.trim();
+    Serial.println(modeInput);
+    
+    if (modeInput == "2") {
+      currentMode = TEST_MODE;
+      Serial.println("\n✅ 테스트 모드 선택\n");
+    } else {
+      currentMode = PRODUCTION_MODE;
+      Serial.println("\n✅ 운영 모드 선택\n");
+    }
+  } else {
+    currentMode = PRODUCTION_MODE;
+    Serial.println("\n(시간 초과 - 운영 모드로 자동 시작)\n");
+  }
 
-  // Generate unique device ID from MAC address
+  // Device ID 생성
   uint8_t mac[6];
   WiFi.macAddress(mac);
   deviceId = "IV_POLE_";
@@ -493,79 +817,132 @@ void setup() {
   Serial.print("[DEVICE] Unique ID: ");
   Serial.println(deviceId);
 
-  // HX711 초기화 with error handling
+  // HX711 초기화
   Serial.println("[SENSOR] Initializing HX711...");
-  scale.begin(D5, D6);
+  scale.begin(D0, D1);
   delay(1000);
 
   bool sensorReady = scale.wait_ready_timeout(1000);
 
   if (sensorReady) {
-    Serial.println("[SENSOR] HX711 detected successfully");
-    Serial.println("[SENSOR] Calibrating...");
-
+    Serial.println("[OK] HX711 감지됨");
+    
+    Serial.println("\n폴대에서 링거를 완전히 제거하세요!");
+    Serial.println("3초 후 영점을 설정합니다...\n");
+    delay(3000);
+    
     scale.set_scale();
     delay(2000);
     scale.tare();
     delay(2000);
     scale.set_scale(calibration_factor);
 
-    float testWeight = scale.get_units(5);
-    Serial.print("[SENSOR] Calibration complete | Test reading: ");
-    Serial.print(testWeight);
-    Serial.println(" g");
-
-    baselineWeight = testWeight;  // 영점 자동 설정
-    Serial.print("[SENSOR] Baseline weight set: ");
+    baselineWeight = scale.get_units(10);
+    Serial.print("[OK] 영점 설정: ");
     Serial.print(baselineWeight);
-    Serial.println(" g");
+    Serial.println(" g\n");
   } else {
-    Serial.println("[SENSOR ERROR] HX711 not detected!");
-    Serial.println("[SENSOR ERROR] Check wiring:");
-    Serial.println("  - DT pin: D5");
-    Serial.println("  - SCK pin: D6");
-    Serial.println("  - VCC: 3.3V (NOT 5V)");
-    Serial.println("  - GND: GND");
+    Serial.println("[ERROR] HX711 감지 실패!");
+    Serial.println("배선 확인: DT=D0, SCK=D1, VCC=3.3V, GND=GND\n");
   }
 
   delay(2000);
 
-  // WiFi 연결
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
-  WiFi.begin(ssid, password);
+  // WiFi 연결 (운영 모드만)
+  if (currentMode == PRODUCTION_MODE) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
+    WiFi.begin(ssid, password);
 
-  Serial.print("WiFi 연결 중");
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 60) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-    ESP.wdtFeed();
+    Serial.print("WiFi 연결 중");
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 60) {
+      delay(500);
+      Serial.print(".");
+      attempts++;
+      ESP.wdtFeed();
+    }
+
+    wifiConnected = (WiFi.status() == WL_CONNECTED);
+    if (wifiConnected) {
+      Serial.println("\n✅ WiFi 연결 성공");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+      
+      Serial.println("\n⏳ 처방 정보 요청 중... (선택사항)");
+      requestPrescriptionInfo();
+    } else {
+      Serial.println("\n❌ WiFi 연결 실패");
+    }
+    
+    Serial.println("💡 처방 정보가 없어도 측정은 진행됩니다\n");
+    
+    currentState = WAITING_WEIGHT;
   }
 
-  wifiConnected = (WiFi.status() == WL_CONNECTED);
-  if (wifiConnected) {
-    Serial.println("\n✅ WiFi 연결 성공");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+  // 초기 무게 읽기
+  Serial.println("이제 링거를 걸어주세요...");
+  delay(5000);
+  
+  currentWeight = safeReadSensor();
+  Serial.print("링거 무게: ");
+  Serial.print(currentWeight - baselineWeight);
+  Serial.print("g (절대값: ");
+  Serial.print(currentWeight);
+  Serial.println("g)\n");
 
-    Serial.println("\n⏳ 간호사 대시보드 연결 대기 중...");
-    Serial.println("💡 간호사가 환자-폴대 연결 후 처방 정보를 받습니다");
-    currentState = IDLE_NO_PRESCRIPTION;
+  // 모드별 초기화
+  if (currentMode == TEST_MODE) {
+    testPreviousWeight = currentWeight;
+    lastTestMeasureTime = millis();
+    
+    Serial.println("════════════════════════════════════════════════════════════");
+    Serial.println("           테스트 모드 명령어");
+    Serial.println("════════════════════════════════════════════════════════════");
+    Serial.println("숫자 - 측정 주기 변경 (초 단위, 5~300)");
+    Serial.println("s - 통계 출력");
+    Serial.println("r - 통계 리셋");
+    Serial.println("t - 영점 재설정");
+    Serial.println("════════════════════════════════════════════════════════════\n");
+    
+    Serial.print("테스트 측정 시작: ");
+    Serial.print(TEST_MEASURE_INTERVAL / 1000);
+    Serial.println("초 주기\n");
   } else {
-    Serial.println("\n❌ WiFi 연결 실패");
-    currentState = IDLE_NO_PRESCRIPTION;
+    // 다중 주기 초기화
+    unsigned long now = millis();
+    for (int i = 0; i < NUM_INTERVALS; i++) {
+      intervalData[i].previousWeight = currentWeight;
+      intervalData[i].lastMeasureTime = now;
+      intervalData[i].currentFlowRate = 0;
+      intervalData[i].totalFlowSum = 0;
+      intervalData[i].measurementCount = 0;
+      intervalData[i].minFlowRate = 99999;
+      intervalData[i].maxFlowRate = -99999;
+    }
+    
+    lastPingTime = millis();
+    lastPrescriptionRequestTime = millis();
+    
+    Serial.println("════════════════════════════════════════════════════════════");
+    Serial.println("           운영 모드 명령어");
+    Serial.println("════════════════════════════════════════════════════════════");
+    Serial.println("s - 상세 통계 출력");
+    Serial.println("c - 측정 주기 변경");
+    Serial.println("r - 통계 리셋");
+    Serial.println("t - 영점 재설정");
+    Serial.println("════════════════════════════════════════════════════════════\n");
+    
+    Serial.print("다중 주기 측정 시작: ");
+    for (int i = 0; i < NUM_INTERVALS; i++) {
+      Serial.print(intervalNames[i]);
+      if (i < NUM_INTERVALS - 1) Serial.print(", ");
+    }
+    Serial.println();
+    Serial.println("측정 즉시 계산 및 출력");
+    Serial.println("편차 10% 이상일 때 서버 전송\n");
   }
-
-  lastMeasureTime = millis();
-  lastPingTime = millis();
-
-  Serial.println("\n🚀 시스템 준비 완료!");
-  Serial.println("명령어:");
-  Serial.println("  'i' - 처방 정보 다시 요청");
-  Serial.println("  's' - 현재 상태 확인");
 
   ESP.wdtFeed();
 }
@@ -575,68 +952,213 @@ void setup() {
 void loop() {
   ESP.wdtFeed();
   unsigned long now = millis();
+
+  // ========== 테스트 모드 ==========
+  if (currentMode == TEST_MODE) {
+    if (Serial.available()) {
+      String input = Serial.readStringUntil('\n');
+      input.trim();
+
+      if (input.length() > 0 && isDigit(input[0])) {
+        int newInterval = input.toInt();
+        
+        if (newInterval >= 5 && newInterval <= 300) {
+          TEST_MEASURE_INTERVAL = newInterval * 1000;
+          
+          Serial.print("\n✅ 측정 주기 변경: ");
+          Serial.print(newInterval);
+          Serial.println(" 초\n");
+          
+          testPreviousWeight = safeReadSensor();
+          lastTestMeasureTime = now;
+          testMeasurementCount = 0;
+          testTotalFlowSum = 0;
+          testMinFlowRate = 99999;
+          testMaxFlowRate = -99999;
+          
+          Serial.println("통계 리셋 - 새 주기로 측정 시작\n");
+        } else {
+          Serial.println("\n⚠️ 유효 범위: 5~300초\n");
+        }
+      }
+      else if (input == "s" || input == "S") {
+        printTestStatistics();
+      }
+      else if (input == "r" || input == "R") {
+        testMeasurementCount = 0;
+        testTotalFlowSum = 0;
+        testMinFlowRate = 99999;
+        testMaxFlowRate = -99999;
+        Serial.println("\n✅ 통계 리셋 완료\n");
+      }
+      else if (input == "t" || input == "T") {
+        Serial.println("\n링거를 제거하세요!");
+        delay(3000);
+        
+        scale.tare();
+        delay(2000);
+        baselineWeight = scale.get_units(10);
+        Serial.print("✅ 새 영점: ");
+        Serial.print(baselineWeight);
+        Serial.println(" g\n");
+        
+        Serial.println("링거를 다시 걸어주세요...");
+        delay(5000);
+        
+        testPreviousWeight = safeReadSensor();
+        lastTestMeasureTime = now;
+        testMeasurementCount = 0;
+        testTotalFlowSum = 0;
+        testMinFlowRate = 99999;
+        testMaxFlowRate = -99999;
+        
+        Serial.print("새 시작 무게: ");
+        Serial.print(testPreviousWeight - baselineWeight);
+        Serial.println(" g\n");
+      }
+    }
+
+    if (now - lastTestMeasureTime >= TEST_MEASURE_INTERVAL) {
+      currentWeight = safeReadSensor();
+
+      if (currentWeight != SENSOR_ERROR_VALUE) {
+        testCurrentFlowRate = calculateTestFlowRate(
+          testPreviousWeight,
+          currentWeight,
+          TEST_MEASURE_INTERVAL
+        );
+        testMeasurementCount++;
+
+        if (testCurrentFlowRate > 0) {
+          testTotalFlowSum += testCurrentFlowRate;
+          if (testCurrentFlowRate < testMinFlowRate) {
+            testMinFlowRate = testCurrentFlowRate;
+          }
+          if (testCurrentFlowRate > testMaxFlowRate) {
+            testMaxFlowRate = testCurrentFlowRate;
+          }
+        }
+
+        float netWeight = currentWeight - baselineWeight;
+        float consumed = testPreviousWeight - currentWeight;
+
+        Serial.println("\n========================================");
+        Serial.print("측정 #");
+        Serial.print(testMeasurementCount);
+        Serial.print(" (주기: ");
+        Serial.print(TEST_MEASURE_INTERVAL / 1000);
+        Serial.println("초)");
+        Serial.println("========================================");
+        Serial.print("이전 무게: ");
+        Serial.print(testPreviousWeight, 2);
+        Serial.println(" g");
+        Serial.print("현재 무게: ");
+        Serial.print(currentWeight, 2);
+        Serial.println(" g");
+        Serial.print("감소량: ");
+        Serial.print(consumed, 2);
+        Serial.println(" g");
+        Serial.println("----------------------------------------");
+        Serial.print("측정 유속: ");
+        Serial.print(testCurrentFlowRate, 2);
+        Serial.println(" mL/분");
+        Serial.println("----------------------------------------");
+        Serial.print("잔여량: ");
+        Serial.print(netWeight, 1);
+        Serial.println(" g");
+
+        if (testMeasurementCount > 0) {
+          float avgFlowRate = testTotalFlowSum / testMeasurementCount;
+          Serial.print("평균 유속: ");
+          Serial.print(avgFlowRate, 2);
+          Serial.println(" mL/분");
+        }
+
+        Serial.println("========================================\n");
+
+        testPreviousWeight = currentWeight;
+      }
+
+      lastTestMeasureTime = now;
+    }
+    
+    delay(10);
+    return;
+  }
+
+  // ========== 운영 모드 - 다중 주기 ==========
   checkAndReconnectWiFi();
 
-  // 30초마다 핑 전송
   if (now - lastPingTime >= PING_INTERVAL) {
     sendPing();
     lastPingTime = now;
   }
 
-  // 시리얼 명령 처리
+  requestPrescriptionInfo();
+
   if (Serial.available()) {
     char command = Serial.read();
-    if (command == 'i') {
-      Serial.println("처방 정보 재요청...");
-      if (requestPrescriptionInfo()) {
-        currentState = WAITING_WEIGHT;
+    
+    if (command == 's' || command == 'S') {
+      printMultiStatistics();
+    }
+    else if (command == 'c' || command == 'C') {
+      configureIntervals();
+      
+      float newWeight = safeReadSensor();
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        intervalData[i].previousWeight = newWeight;
+        intervalData[i].lastMeasureTime = now;
+        intervalData[i].totalFlowSum = 0;
+        intervalData[i].measurementCount = 0;
+        intervalData[i].minFlowRate = 99999;
+        intervalData[i].maxFlowRate = -99999;
       }
-    } else if (command == 's') {
-      Serial.println("\n=== 현재 상태 ===");
-      Serial.print("상태: ");
-      Serial.println(getStateString(currentState));
-      Serial.print("현재 무게: ");
-      Serial.print(currentWeight, 2);
-      Serial.println(" g");
-      Serial.print("영점 무게: ");
-      Serial.print(baselineWeight, 2);
-      Serial.println(" g");
-
-      if (prescription.isInitialized) {
-        Serial.print("처방 유속: ");
-        Serial.print(prescription.prescribedRate, 2);
-        Serial.println(" mL/min");
-        Serial.print("총 용량: ");
-        Serial.print(prescription.totalVolume);
-        Serial.println(" mL");
-      } else {
-        Serial.println("처방 정보 없음");
+      
+      Serial.println("✅ 새 주기로 측정을 시작합니다\n");
+    }
+    else if (command == 'r' || command == 'R') {
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        intervalData[i].totalFlowSum = 0;
+        intervalData[i].measurementCount = 0;
+        intervalData[i].minFlowRate = 99999;
+        intervalData[i].maxFlowRate = -99999;
       }
-
-      if (currentState == MEASURING) {
-        Serial.print("측정 샘플: ");
-        Serial.print(weight120Full ? 120 : weightIndex120);
-        Serial.print("/120 (");
-        Serial.print(weight120Full ? "준비됨" : "대기 중");
-        Serial.println(")");
+      Serial.println("\n✅ 모든 통계 리셋 완료\n");
+    }
+    else if (command == 't' || command == 'T') {
+      Serial.println("\n링거를 제거하세요!");
+      delay(3000);
+      
+      scale.tare();
+      delay(2000);
+      baselineWeight = scale.get_units(10);
+      Serial.print("✅ 새 영점: ");
+      Serial.print(baselineWeight);
+      Serial.println(" g\n");
+      
+      Serial.println("링거를 다시 걸어주세요...");
+      delay(15000);
+      
+      float newWeight = safeReadSensor();
+      
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        intervalData[i].previousWeight = newWeight;
+        intervalData[i].lastMeasureTime = now;
+        intervalData[i].totalFlowSum = 0;
+        intervalData[i].measurementCount = 0;
+        intervalData[i].minFlowRate = 99999;
+        intervalData[i].maxFlowRate = -99999;
       }
+      
+      Serial.print("새 시작 무게: ");
+      Serial.print(newWeight - baselineWeight);
+      Serial.println(" g\n");
     }
   }
 
-  // ==================== 상태 머신 ====================
-
   switch (currentState) {
-
-    // --- 상태 1: 처방 대기 ---
-    case IDLE_NO_PRESCRIPTION:
-      // 처방 정보를 받을 때까지 대기
-      // 간호사가 대시보드에서 연결하면 자동으로 처방 정보 수신
-      delay(1000);
-      break;
-
-    // --- 상태 2: 무게 대기 (수액 걸기 전) ---
     case WAITING_WEIGHT:
-      // 무게 감지: 영점보다 50g 이상 증가
       currentWeight = safeReadSensor();
 
       if (currentWeight == SENSOR_ERROR_VALUE) {
@@ -645,167 +1167,259 @@ void loop() {
       }
 
       if (currentWeight - baselineWeight > WEIGHT_DETECTION_THRESHOLD) {
-        // 첫 감지
         if (weightDetectedTime == 0) {
           weightDetectedTime = now;
-          Serial.print("🔍 수액 감지됨 (");
+          Serial.print("💧 수액 감지됨 (");
           Serial.print(currentWeight - baselineWeight);
           Serial.println(" g) - 10초 후 측정 시작...");
         }
 
-        // 10초 경과 확인
         if (now - weightDetectedTime >= AUTO_START_DELAY) {
           initialWeight = currentWeight;
           measureStartTime = now;
 
-          // 샘플링 초기화
-          weightIndex120 = 0;
-          weight120Full = false;
-          lastMeasureTime = now;
+          for (int i = 0; i < NUM_INTERVALS; i++) {
+            intervalData[i].previousWeight = currentWeight;
+            intervalData[i].lastMeasureTime = now;
+          }
 
-          Serial.print("✅ 초기 무게 자동 저장: ");
+          Serial.print("✅ 초기 무게: ");
           Serial.print(initialWeight);
           Serial.println(" g");
-          Serial.println("📊 측정 시작! (60초 후 유속 계산 시작)");
+          Serial.println("🚀 다중 주기 측정 시작! (즉시 계산 모드)");
 
           currentState = MEASURING;
           weightDetectedTime = 0;
         }
       } else {
-        // 무게가 줄어들면 리셋
         weightDetectedTime = 0;
       }
 
       delay(500);
       break;
 
-    // --- 상태 3: 측정 중 (0.5초마다 샘플링) ---
-    case MEASURING:
-      // 0.5초마다 측정
-      if (now - lastMeasureTime >= MEASURE_INTERVAL) {
-        currentWeight = safeReadSensor();
+    // ========== MEASURING 케이스 내부 수정 ==========
 
-        if (currentWeight == SENSOR_ERROR_VALUE) {
-          lastMeasureTime = now;
-          break;
+case MEASURING:
+  {
+    bool anyMeasurement = false;
+    bool allIntervalsCompleted = false;
+    
+    for (int i = 0; i < NUM_INTERVALS; i++) {
+      if (now - intervalData[i].lastMeasureTime >= INTERVALS[i]) {
+        float freshWeight = safeReadSensor();
+        
+        if (freshWeight == SENSOR_ERROR_VALUE) {
+          intervalData[i].lastMeasureTime = now;
+          continue;
         }
-
-        // 샘플 추가
-        addWeightSample(currentWeight);
-
-        // 유속 계산 (60초 후부터)
-        float flowRate = calculateFlowRate();
-        float remainingWeight = currentWeight - baselineWeight;
-        float remainingTime = calculateRemainingTime(remainingWeight, flowRate);
+        
+        float flowRate = calculateFlowRate(
+          intervalData[i].previousWeight,
+          freshWeight,
+          INTERVALS[i]
+        );
+        
+        intervalData[i].currentFlowRate = flowRate;
+        intervalData[i].measurementCount++;
+        
+        if (flowRate > 0) {
+          intervalData[i].totalFlowSum += flowRate;
+          if (flowRate < intervalData[i].minFlowRate) {
+            intervalData[i].minFlowRate = flowRate;
+          }
+          if (flowRate > intervalData[i].maxFlowRate) {
+            intervalData[i].maxFlowRate = flowRate;
+          }
+        }
+        
+        float weightChange = intervalData[i].previousWeight - freshWeight;
+        
+        Serial.print("[");
+        Serial.print(intervalNames[i]);
+        Serial.print(" #");
+        Serial.print(intervalData[i].measurementCount);
+        Serial.print("] ");
+        Serial.print(intervalData[i].previousWeight, 1);
+        Serial.print("g → ");
+        Serial.print(freshWeight, 1);
+        Serial.print("g (");
+        
+        if (weightChange >= 0) {
+          Serial.print(weightChange, 2);
+          Serial.print("g 감소");
+        } else {
+          Serial.print("+");
+          Serial.print(abs(weightChange), 2);
+          Serial.print("g 증가");
+        }
+        
+        Serial.print(") → 유속: ");
+        Serial.print(flowRate, 2);
+        Serial.println(" mL/분");
+        
+        intervalData[i].previousWeight = freshWeight;
+        intervalData[i].lastMeasureTime = now;
+        currentWeight = freshWeight;
+        
+        anyMeasurement = true;
+        
+        allIntervalsCompleted = true;
+        for (int j = 0; j < NUM_INTERVALS; j++) {
+          if (intervalData[j].measurementCount == 0) {
+            allIntervalsCompleted = false;
+            break;
+          }
+        }
+        
+        delay(200);
+      }
+    }
+    
+    if (anyMeasurement && allIntervalsCompleted) {
+      calculateCombinedAverage();
+      
+      Serial.println("\n════════════════════════════════════════════════════════════");
+      Serial.println("          📊 4개 주기 측정 완료 - 통합 결과");
+      Serial.println("════════════════════════════════════════════════════════════");
+      
+      for (int i = 0; i < NUM_INTERVALS; i++) {
+        if (intervalData[i].measurementCount > 0) {
+          float avg = intervalData[i].totalFlowSum / intervalData[i].measurementCount;
+          Serial.print("  ");
+          Serial.print(intervalNames[i]);
+          Serial.print(" 평균: ");
+          Serial.print(avg, 2);
+          Serial.print(" mL/분 (");
+          Serial.print(intervalData[i].measurementCount);
+          Serial.println("회 측정)");
+        }
+      }
+      
+      Serial.println("────────────────────────────────────────────────────────────");
+      Serial.print("  📌 통합 평균 유속: ");
+      Serial.print(combinedAverageFlowRate, 2);
+      Serial.println(" mL/분");
+      
+      if (prescription.isInitialized) {
+        float deviation = calculateFlowDeviation(combinedAverageFlowRate);
+        String status = getDeviationStatus(deviation);
+        
+        Serial.print("  🎯 처방 유속: ");
+        Serial.print(prescription.prescribedRate, 2);
+        Serial.print(" mL/분");
+        Serial.print(" | 편차: ");
+        if (deviation >= 0) Serial.print("+");
+        Serial.print(deviation, 1);
+        Serial.print("% ");
+        Serial.println(status);
+      }
+      Serial.println("════════════════════════════════════════════════════════════\n");
+      
+      if (combinedAverageFlowRate > 0) {
+        // ✅ 올바른 순서로 변수 선언
+        float remainingLiquidWeight = currentWeight - EMPTY_BAG_WEIGHT - baselineWeight;
+        float initialLiquidWeight = initialWeight - EMPTY_BAG_WEIGHT - baselineWeight;
+        float consumedLiquidWeight = initialLiquidWeight - remainingLiquidWeight;
+        
         float percentage = 0;
-        if (initialWeight - baselineWeight > 0) {
-          percentage = (remainingWeight / (initialWeight - baselineWeight)) * 100.0;
+        if (initialLiquidWeight > 0) {
+          percentage = (remainingLiquidWeight / initialLiquidWeight) * 100.0;
         }
-        float deviation = calculateFlowDeviation(flowRate);
-
-        // 1초 간격으로 상세 출력 (0.5초마다 측정하지만 2번에 1번만 출력)
-        if (weightIndex120 % 2 == 0) {
-          Serial.print("[");
-          Serial.print(now / 1000);
-          Serial.print("s] 무게: ");
-          Serial.print(currentWeight, 1);
-          Serial.print("g (잔량: ");
-          Serial.print(remainingWeight, 1);
-          Serial.print("g, ");
-          Serial.print(percentage, 1);
-          Serial.print("%) | ");
-
-          if (flowRate > 0) {
-            Serial.print("유속: ");
-            Serial.print(flowRate, 2);
-            Serial.print(" mL/분");
-
-            if (prescription.isInitialized) {
-              Serial.print(" (처방: ");
-              Serial.print(prescription.prescribedRate, 2);
-              Serial.print(", 편차: ");
-              if (deviation >= 0) Serial.print("+");
-              Serial.print(deviation, 1);
-              Serial.print("%)");
-            }
-          } else {
-            Serial.print("유속: 측정 중... (");
-            Serial.print(weightIndex120);
-            Serial.print("/120)");
-          }
-
-          Serial.print(" | ");
-
-          if (remainingTime > 0 && flowRate > 0) {
-            Serial.print("예상완료: ");
-            Serial.print((int)remainingTime);
-            Serial.print("분 후");
-          } else {
-            Serial.print("예상완료: 계산 중...");
-          }
-
-          Serial.println();
+        
+        int remainingVolume = (int)remainingLiquidWeight;
+        float remainingTime = calculateRemainingTime(remainingLiquidWeight, combinedAverageFlowRate);
+        float deviation = calculateFlowDeviation(combinedAverageFlowRate);
+        
+        bool shouldSend = false;
+        String sendReason = "";
+        
+        if (!initialDataSent && totalCombinedMeasurements == NUM_INTERVALS) {
+          shouldSend = true;
+          sendReason = "초기 데이터";
+          initialDataSent = true;
         }
-
-        // 이벤트 기반 전송 로직
-        if (flowRate > 0 && prescription.isInitialized) {
-          bool shouldSendData = false;
-          String sendReason = "";
-
-          // 조건 1: 초기 데이터 (60초 후 1회만)
-          if (!initialDataSent && weight120Full) {
-            shouldSendData = true;
-            sendReason = "초기 데이터 (60초 경과)";
-            initialDataSent = true;
-          }
-          // 조건 2: 긴급 편차 (25% 이상)
-          else if (abs(deviation) > CRITICAL_DEVIATION_THRESHOLD) {
-            shouldSendData = true;
-            sendReason = "긴급 유속 이상";
+        else if (shouldSendData(combinedAverageFlowRate, remainingVolume, deviation)) {
+          shouldSend = true;
+          sendReason = "데이터 변화 감지";
+        }
+        else if (prescription.isInitialized && abs(deviation) >= WARNING_DEVIATION_THRESHOLD) {
+          shouldSend = true;
+          if (abs(deviation) >= CRITICAL_DEVIATION_THRESHOLD) {
+            sendReason = "🚨 편차 20% 이상 (위험)";
             sendAlert("FLOW_RATE_CRITICAL", deviation);
-          }
-          // 조건 3: 경고 편차 (15% 이상)
-          else if (abs(deviation) > DATA_SEND_DEVIATION_THRESHOLD) {
-            shouldSendData = true;
-            sendReason = "유속 이상";
-            sendAlert("FLOW_RATE_ABNORMAL", deviation);
-          }
-          // 조건 4: 잔여량 부족 (10% 미만)
-          else if (percentage < LOW_VOLUME_THRESHOLD) {
-            shouldSendData = true;
-            sendReason = "잔여량 부족";
-            sendAlert("LOW_VOLUME", percentage);
-          }
-          // 조건 5: 수액 소진 (5% 미만)
-          else if (percentage < 5.0) {
-            shouldSendData = true;
-            sendReason = "수액 소진 임박";
-            sendAlert("CRITICAL_LOW", percentage);
-          }
-
-          // 중복 전송 방지 (최소 5초 간격)
-          if (shouldSendData && (now - lastDataSendTime >= MIN_SEND_INTERVAL)) {
-            Serial.print("📤 [백엔드 전송] 사유: ");
-            Serial.println(sendReason);
-            sendData(currentWeight, flowRate, remainingTime * 60.0, deviation, getStateString(currentState));
-            lastDataSendTime = now;
+          } else {
+            sendReason = "⚠️ 편차 10% 이상 (주의)";
+            sendAlert("FLOW_RATE_WARNING", deviation);
           }
         }
-
-        // 완료 조건: 잔여량 1% 미만
-        if (percentage < 1.0 && flowRate > 0) {
-          Serial.println("\n✅ 수액 투여 완료!");
+        else if (percentage < LOW_VOLUME_THRESHOLD && percentage > 0) {
+          shouldSend = true;
+          sendReason = "💧 잔여량 부족 (10% 미만)";
+          sendAlert("LOW_VOLUME", percentage);
+        }
+        
+        if (shouldSend && (now - lastDataSendTime >= MIN_SEND_INTERVAL)) {
+          Serial.print("📤 [서버 전송] ");
+          Serial.println(sendReason);
+          sendData(currentWeight, combinedAverageFlowRate, remainingTime * 60.0, deviation, getStateString(currentState));
+          
+          serverLastData.lastFlowRate = combinedAverageFlowRate;
+          serverLastData.lastRemainingVolume = remainingVolume;
+          serverLastData.lastDeviation = deviation;
+          serverLastData.hasData = true;
+          
+          lastDataSendTime = now;
+        }
+        
+        if (remainingLiquidWeight <= 0) {
+          Serial.println("\n╔════════════════════════════════════════╗");
+          Serial.println("║      ✅ 수액 투여 완료!              ║");
+          Serial.println("║      (수액팩이 비어 제거됨)          ║");
+          Serial.println("╚════════════════════════════════════════╝");
+          Serial.print("총 소비량: ");
+          Serial.print(consumedLiquidWeight, 2);
+          Serial.println(" mL");
+          Serial.print("완료 시간: ");
+          Serial.print((now - measureStartTime) / 1000.0);
+          Serial.println(" 초\n");
+          
+          sendAlert("INFUSION_COMPLETE", consumedLiquidWeight);
+          sendData(currentWeight, combinedAverageFlowRate, 0, deviation, "COMPLETED");
+          
           currentState = COMPLETED;
         }
-
-        lastMeasureTime = now;
+        else if (remainingLiquidWeight < 5.0 && remainingLiquidWeight > 0) {
+          Serial.println("\n⚠️ 경고: 수액이 거의 다 나갔습니다 (5mL 미만)");
+          Serial.print("남은 수액: ");
+          Serial.print(remainingLiquidWeight, 2);
+          Serial.println(" mL\n");
+          sendAlert("LOW_LIQUID_WARNING", remainingLiquidWeight);
+        }
       }
-      break;
+    }
+    else if (anyMeasurement && !allIntervalsCompleted) {
+      Serial.println("  ⏳ 다른 주기 측정 대기 중...\n");
+    }
+  }
+  break;
 
-    // --- 상태 4: 완료 ---
+
+
     case COMPLETED:
-      Serial.println("측정 종료됨");
-      delay(5000);
+      // ✅ 한번만 출력하고 자동으로 리셋
+      static bool completedMessageShown = false;
+      
+      if (!completedMessageShown) {
+        Serial.println("✅ 측정 종료됨");
+        completedMessageShown = true;
+        
+        delay(3000);
+        
+        // ✅ 자동으로 새 세션 준비
+        resetSystemForNewSession();
+        completedMessageShown = false;  // 다음 세션을 위해 리셋
+      }
       break;
   }
 

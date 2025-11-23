@@ -2,21 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/infusion_session.dart';
+import '../../data/models/patient.dart';
 
 /// 친근한 터콰이즈 그라디언트 헤더
 class FriendlyHeader extends StatelessWidget {
+  final Patient? patient;
   final InfusionSession? session;
   final VoidCallback? onLogout;
 
   const FriendlyHeader({
     super.key,
+    this.patient,
     this.session,
     this.onLogout,
   });
 
   @override
   Widget build(BuildContext context) {
-    final remaining = session?.currentWeight.toInt() ?? 0;
+    final remaining = session?.remainingVolume.toInt() ?? 0; // 남은 수액량(mL) 표시
     final screenHeight = MediaQuery.of(context).size.height;
     final maxHeaderHeight = screenHeight * 0.33; // 화면의 1/3로 제한
 
@@ -45,20 +48,39 @@ class FriendlyHeader extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 로그아웃 버튼 (오른쪽 상단)
-                if (onLogout != null)
-                  Align(
-                    alignment: Alignment.topRight,
-                    child: IconButton(
-                      onPressed: onLogout,
-                      icon: const Icon(Icons.logout),
-                      color: Colors.white,
-                      iconSize: 22,
-                      tooltip: '로그아웃',
-                      padding: EdgeInsets.zero, // padding 제거
-                      constraints: const BoxConstraints(), // constraints 제거
-                    ),
-                  ),
+                // 첫 줄: 환자 정보 (왼쪽) + 로그아웃 버튼 (오른쪽)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // 환자 정보 (이름 | 병실-침대)
+                    if (patient != null)
+                      Text(
+                        '${patient!.name} | ${patient!.roomInfo}',
+                        style: GoogleFonts.notoSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+
+                    // 로그아웃 버튼
+                    if (onLogout != null)
+                      IconButton(
+                        onPressed: onLogout,
+                        icon: const Icon(Icons.logout),
+                        color: Colors.white,
+                        iconSize: 22,
+                        tooltip: '로그아웃',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                  ],
+                ),
+                const SizedBox(height: 8),
 
                 // 캐릭터 일러스트 (중앙) - 더 작게
                 Center(

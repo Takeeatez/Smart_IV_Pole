@@ -285,9 +285,18 @@ export const useWardStore = create<WardStore>((set, get) => ({
   },
 
   addAlert: (alert: Alert) => {
-    set((state) => ({
-      alerts: [alert, ...state.alerts]
-    }));
+    set((state) => {
+      // 중복 체크: 같은 ID의 alert가 이미 있으면 추가하지 않음
+      const exists = state.alerts.some(existingAlert => existingAlert.id === alert.id);
+      if (exists) {
+        console.warn(`⚠️ Alert ${alert.id} already exists, skipping duplicate`);
+        return state;
+      }
+
+      return {
+        alerts: [alert, ...state.alerts]
+      };
+    });
     get().saveToStorage();
   },
 
@@ -914,7 +923,7 @@ export const useWardStore = create<WardStore>((set, get) => ({
         patientId: numericPatientId,
         drugTypeId: drugTypeId,
         totalVolumeMl: Math.round(prescriptionData.totalVolume), // Integer로 변환
-        infusionRateMlHr: Math.round(prescriptionData.calculatedFlowRate), // Integer로 변환
+        infusionRateMlHr: prescriptionData.calculatedFlowRate, // mL/min (Double 유지 - 소수점 precision 보존)
         gttFactor: prescriptionData.gttFactor, // 이미 integer
         calculatedGtt: Math.round(prescriptionData.calculatedGTT), // Integer로 변환
         durationHours: prescriptionData.duration / 60, // 분을 시간으로 변환 (Double 유지)
@@ -1460,6 +1469,13 @@ export const useWardStore = create<WardStore>((set, get) => ({
    */
   acknowledgeAlertBackend: async (alertId: string, nurseId: string) => {
     const { isServerConnected } = get();
+
+    // 로컬 생성 alert는 백엔드 호출 스킵 (ALERT_로 시작하는 경우)
+    if (alertId.startsWith('ALERT_')) {
+      console.log('ℹ️ [acknowledgeAlert] Local alert, skipping backend acknowledgement');
+      get().acknowledgeAlert(alertId, nurseId);
+      return;
+    }
 
     if (!isServerConnected) {
       console.log('⚠️ [acknowledgeAlert] Server not connected, using local storage only');

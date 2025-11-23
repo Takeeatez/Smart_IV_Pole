@@ -168,8 +168,8 @@ export const useWebSocket = (config?: WebSocketConfig): WebSocketHookReturn => {
         currentVolume: remaining_volume,
         capacity: totalVolume,                       // ✅ Set capacity from prescription
         percentage: recalculatedPercentage,          // ✅ Recalculated based on prescription
-        flowRate: flow_rate_measured * 60,           // ✅ Convert mL/min → mL/h
-        prescribedRate: flow_rate_prescribed * 60,   // ✅ Convert mL/min → mL/h
+        flowRate: flow_rate_measured,                // ✅ ESP already sends mL/min
+        prescribedRate: flow_rate_prescribed,        // ✅ ESP already sends mL/min
         status: state === 'STABLE' ? 'online' : 'error',
         estimatedTime: remaining_time_sec ? remaining_time_sec / 60 : 0, // Convert seconds to minutes
         lastUpdate: new Date(timestamp),

@@ -143,6 +143,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     children: [
                       // 친근한 터콰이즈 헤더
                       FriendlyHeader(
+                        patient: state.patient,
                         session: state.currentSession,
                         onLogout: _handleLogout,
                       ),

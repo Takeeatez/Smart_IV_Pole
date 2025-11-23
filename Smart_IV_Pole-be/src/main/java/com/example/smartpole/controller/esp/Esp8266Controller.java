@@ -155,7 +155,6 @@ public class Esp8266Controller {
 
             // 시간 정보
             wsMessage.put("remaining_time_sec", remainingTimeSec);
-            wsMessage.put("remaining_time_min", remainingTimeSec != null ? remainingTimeSec / 60.0 : 0);
 
             // 상태 정보
             wsMessage.put("state", state);
@@ -309,9 +308,9 @@ public class Esp8266Controller {
             prescriptionData.put("patient_id", session.getPatientId());
             prescriptionData.put("total_volume_ml", session.getTotalVolumeMl());
 
-            // FlowRate는 이미 mL/min으로 저장되어 있음 (변환 불필요)
-            double flowRateMlPerMin = session.getFlowRate().doubleValue();
-            prescriptionData.put("flow_rate_ml_min", flowRateMlPerMin);
+            // FlowRate는 mL/min으로 저장되어 있음 (그대로 전송)
+            double flowRateMlMin = session.getFlowRate().doubleValue();
+            prescriptionData.put("flow_rate_ml_min", flowRateMlMin);
 
             // Prescription 엔티티에서 실제 GTT 정보 가져오기
             Prescription prescription = session.getPrescription();
@@ -326,7 +325,7 @@ public class Esp8266Controller {
                 // Fallback: Prescription 없으면 기본값 사용
                 // 간호사 실제 공식: GTT/min = (총용량 mL × GTT factor) ÷ 시간(분)
                 int gttFactor = 20;  // 기본: macro drip (20 drops/mL)
-                double totalDurationMin = session.getTotalVolumeMl() / flowRateMlPerMin;
+                double totalDurationMin = session.getTotalVolumeMl() / flowRateMlMin;
                 int calculatedGtt = (int)((session.getTotalVolumeMl() * gttFactor) / totalDurationMin);
 
                 prescriptionData.put("gtt_factor", gttFactor);
@@ -346,7 +345,7 @@ public class Esp8266Controller {
 
             System.out.println("✅ 처방 정보 전송 완료");
             System.out.println("총 용량: " + session.getTotalVolumeMl() + " mL");
-            System.out.println("유속: " + flowRateMlPerMin + " mL/min");
+            System.out.println("유속: " + flowRateMlMin + " mL/min");
 
             return createResponse("success", "Prescription data retrieved successfully", prescriptionData);
 
@@ -374,74 +373,87 @@ public class Esp8266Controller {
      * ESP8266이 30초마다 핑을 보내 온라인 상태 유지
      */
     @PostMapping("/ping")
-    public Map<String, Object> receivePing(@RequestBody Map<String, Object> data) {
-        try {
-            String deviceId = (String) data.get("device_id");
-            Integer batteryLevel = parseInteger(data.get("battery_level"));
+public Map<String, Object> receivePing(@RequestBody Map<String, Object> data) {
+    try {
+        String deviceId = (String) data.get("device_id");
+        Integer batteryLevel = parseInteger(data.get("battery_level"));
 
-            System.out.println("[ESP PING] Device: " + deviceId + " | Battery: " + batteryLevel + "%");
+        System.out.println("[ESP PING] Device: " + deviceId + " | Battery: " + batteryLevel + "%");
 
-            // 1. Pole 찾기 또는 자동 생성
-            Pole pole = poleService.getPoleById(deviceId)
-                    .orElseGet(() -> {
-                        // 폴대가 없으면 자동 생성 (Auto-registration)
-                        System.out.println("[INFO] New pole auto-registered: " + deviceId);
-                        Pole newPole = new Pole();
-                        newPole.setPoleId(deviceId);
-                        newPole.setStatus(Pole.PoleStatus.active);
-                        newPole.setBatteryLevel(batteryLevel != null ? batteryLevel : 100);
-                        newPole.setIsOnline(true);
-                        newPole.setCreatedAt(LocalDateTime.now());
-                        newPole.setUpdatedAt(LocalDateTime.now());
-                        return poleService.savePole(newPole);
-                    });
+        // Pole 업데이트
+        Pole pole = poleService.getPoleById(deviceId)
+                .orElseGet(() -> {
+                    Pole newPole = new Pole();
+                    newPole.setPoleId(deviceId);
+                    newPole.setStatus(Pole.PoleStatus.active);
+                    newPole.setBatteryLevel(batteryLevel != null ? batteryLevel : 100);
+                    newPole.setIsOnline(true);
+                    newPole.setCreatedAt(LocalDateTime.now());
+                    newPole.setUpdatedAt(LocalDateTime.now());
+                    return poleService.savePole(newPole);
+                });
 
-            // 2. 핑 업데이트
-            pole.updatePing();
-            if (batteryLevel != null) {
-                pole.setBatteryLevel(batteryLevel);
-            }
-            poleService.savePole(pole);
-
-            // 3. 활성 세션 확인 (처방 정보 있는지 체크)
-            Optional<InfusionSession> activeSession = infusionSessionRepository
-                    .findByIvPoleIdAndStatus(deviceId, InfusionSession.SessionStatus.ACTIVE);
-
-            boolean hasPrescription = activeSession.isPresent();
-
-            // 4. WebSocket 브로드캐스트 (폴대 상태 변경)
-            Map<String, Object> wsMessage = new HashMap<>();
-            wsMessage.put("type", "battery_update");  // ✅ 메시지 타입 추가
-            wsMessage.put("device_id", deviceId);
-            wsMessage.put("pole_id", deviceId);
-            wsMessage.put("is_online", true);
-            wsMessage.put("battery_level", pole.getBatteryLevel());
-            wsMessage.put("last_ping_at", pole.getLastPingAt().toString());
-            wsMessage.put("timestamp", LocalDateTime.now().toString());
-
-            messagingTemplate.convertAndSend("/topic/poles/status", wsMessage);
-            messagingTemplate.convertAndSend("/topic/patients", wsMessage);  // ✅ 통합 토픽에도 브로드캐스트
-
-            System.out.println("[ESP PING] Success - Pole online | prescription_available=" + hasPrescription);
-
-            // 5. 응답에 처방 가능 여부 포함
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("message", "Ping received");
-            response.put("prescription_available", hasPrescription);
-            response.put("device_id", deviceId);
-            response.put("battery_level", pole.getBatteryLevel());
-            response.put("is_online", true);
-            response.put("timestamp", LocalDateTime.now().toString());
-
-            return response;
-
-        } catch (Exception e) {
-            System.err.println("[ESP PING] Error: " + e.getMessage());
-            e.printStackTrace();
-            return createResponse("error", "Failed to process ping: " + e.getMessage(), data);
+        pole.updatePing();
+        if (batteryLevel != null) {
+            pole.setBatteryLevel(batteryLevel);
         }
+        poleService.savePole(pole);
+
+        // ✅ 활성 세션의 최근 데이터 조회
+        Optional<InfusionSession> activeSession = infusionSessionRepository
+                .findByIvPoleIdAndStatus(deviceId, InfusionSession.SessionStatus.ACTIVE);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("message", "Ping received");
+        response.put("device_id", deviceId);
+        response.put("battery_level", pole.getBatteryLevel());
+        response.put("is_online", true);
+
+        // ✅ 세션이 있으면 최근 측정 데이터 포함
+        if (activeSession.isPresent()) {
+            InfusionSession session = activeSession.get();
+            
+            Map<String, Object> lastData = new HashMap<>();
+            lastData.put("flow_rate", session.getMeasuredFlowRate());           // 마지막 유속
+            lastData.put("remaining_volume", session.getRemainingVolume());     // 마지막 잔량
+            lastData.put("deviation", session.getDeviationPercent());           // 마지막 편차
+            lastData.put("last_update", session.getLastSensorUpdate());         // 마지막 업데이트 시간
+            
+            response.put("has_session", true);
+            response.put("has_prescription", session.getPrescriptionId() != null);
+            response.put("last_data", lastData);  // ✅ 서버의 최근 데이터
+            
+            System.out.println("[ESP PING] Last data - Flow: " + session.getMeasuredFlowRate() + 
+                             " mL/min, Remaining: " + session.getRemainingVolume() + " mL");
+        } else {
+            response.put("has_session", false);
+            response.put("has_prescription", false);
+            response.put("last_data", null);
+        }
+
+        response.put("timestamp", LocalDateTime.now().toString());
+
+        // WebSocket 브로드캐스트
+        Map<String, Object> wsMessage = new HashMap<>();
+        wsMessage.put("type", "battery_update");
+        wsMessage.put("device_id", deviceId);
+        wsMessage.put("battery_level", pole.getBatteryLevel());
+        wsMessage.put("is_online", true);
+        wsMessage.put("timestamp", LocalDateTime.now().toString());
+
+        messagingTemplate.convertAndSend("/topic/poles/status", wsMessage);
+        messagingTemplate.convertAndSend("/topic/patients", wsMessage);
+
+        return response;
+
+    } catch (Exception e) {
+        System.err.println("[ESP PING] Error: " + e.getMessage());
+        e.printStackTrace();
+        return createResponse("error", "Failed to process ping: " + e.getMessage(), data);
     }
+}
+
 
     /**
      * 구형 센서 데이터 엔드포인트 (하위 호환성)
